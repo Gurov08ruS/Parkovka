@@ -4,7 +4,10 @@ const accountForm = $("account-form");
 const accountMessage = $("account-message");
 const accountSubmit = $("account-submit");
 const panel = $("panel-dialog");
-const panelContent = $("panel-content");
+const panelContent = $("tab-content");
+const tabTitles = { home: "Главная", history: "Мои обращения", profile: "Личный кабинет" };
+let currentTab = "home";
+let loginRequest = null;
 const statuses = {
     draft: "Черновик",
     pending: "Ожидает проверки",
@@ -64,8 +67,11 @@ function setSession(data) {
     }
 }
 
-export async function requestMaxCameraAccess() {
-    if (!bridge) return;
+export function requestMaxCameraAccess() {
+    return bridge ? requestBridgeCameraAccess() : null;
+}
+
+async function requestBridgeCameraAccess() {
     const app = await Promise.race([bridge, new Promise((resolve) => setTimeout(() => resolve(null), 2000))]);
     const manager = app?.PermissionsManager;
     if (!manager) return;
@@ -74,8 +80,11 @@ export async function requestMaxCameraAccess() {
         await manager.requestAccess(["camera"], "Для съёмки знака и автомобиля");
     } catch (error) {
         const code = error?.error?.code || "";
-        if (code.endsWith("app_permission_denied") || code.endsWith("system_permission_denied")) {
-            throw new DOMException("Разрешите доступ к камере в настройках MAX или устройства.", "NotAllowedError");
+        if (code.endsWith("app_permission_denied")) {
+            throw new DOMException("Разрешите доступ к камере в настройках мини-приложения MAX.", "MaxAppPermissionDenied");
+        }
+        if (code.endsWith("system_permission_denied")) {
+            throw new DOMException("Разрешите доступ MAX к камере в настройках устройства.", "MaxSystemPermissionDenied");
         }
         throw error;
     }
@@ -91,15 +100,28 @@ function openLogin(action) {
     accountSubmit.disabled = !test && !initData();
     accountMessage.textContent = "";
     afterLogin = action;
-    if (!accountDialog.open) accountDialog.showModal();
+    if (currentTab === "home") {
+        accountDialog.append(accountForm);
+        if (!accountDialog.open) accountDialog.showModal();
+    } else {
+        panelContent.replaceChildren(element("h3", "Вход"), accountForm);
+    }
 }
 
 export async function requireAccount(action) {
+    const version = panelVersion;
     try {
-        setSession(await request("/api/session"));
+        if (loginRequest) await loginRequest;
+        const data = await request("/api/session");
+        if (version !== panelVersion) return;
+        setSession(data);
     } catch (error) {
-        openPanel("Вход");
-        panelContent.append(statusMessage(error.message), button("Повторить", () => requireAccount(action)));
+        if (version !== panelVersion) return;
+        const content = currentTab === "home" ? openModalPanel("Вход") : panelContent;
+        content.replaceChildren(statusMessage(error.message), button("Повторить", () => {
+            if (panel.open) panel.close();
+            requireAccount(action);
+        }));
         return;
     }
     if (!session.user) {
@@ -111,27 +133,32 @@ export async function requireAccount(action) {
 
 accountForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (loginRequest) return;
+    const action = afterLogin;
+    const version = panelVersion;
     const input = session.mode === "test"
         ? Object.fromEntries(new FormData(accountForm))
         : { init_data: initData() };
     accountSubmit.disabled = true;
     accountMessage.textContent = "Входим…";
     try {
-        setSession(await request("/api/session", input));
-        const action = afterLogin;
+        loginRequest = request("/api/session", input);
+        const data = await loginRequest;
+        if (version !== panelVersion || action !== afterLogin) return;
+        setSession(data);
         accountForm.reset();
-        if (accountDialog.open) {
-            accountDialog.close();
-            action?.();
-        }
+        if (accountDialog.open) accountDialog.close();
+        afterLogin = null;
+        action?.();
     } catch (error) {
-        accountMessage.textContent = error.message;
+        if (version === panelVersion && action === afterLogin) accountMessage.textContent = error.message;
     } finally {
+        loginRequest = null;
         accountSubmit.disabled = session.mode === "max" && !initData();
     }
 });
 accountDialog.addEventListener("close", () => {
-    if (!accountDialog.open) afterLogin = null;
+    if (!accountDialog.open && currentTab === "home") afterLogin = null;
 });
 
 function element(tag, text = "", className = "") {
@@ -173,16 +200,25 @@ function field(label, name, options = {}) {
     return wrapper;
 }
 
+function openModalPanel(title) {
+    $("panel-title").textContent = title;
+    const content = $("panel-content");
+    content.replaceChildren();
+    if (!panel.open) panel.showModal();
+    return content;
+}
+
 function openPanel(title) {
     panelVersion += 1;
-    $("panel-title").textContent = title;
+    if (panelContent.contains(accountForm)) accountDialog.append(accountForm);
+    $("tab-title").textContent = title;
     panelContent.replaceChildren();
-    if (!panel.open) panel.showModal();
+    window.scrollTo(0, 0);
     return panelVersion;
 }
 
 function activePanel(version) {
-    return panel.open && panelVersion === version;
+    return currentTab !== "home" && panelVersion === version;
 }
 
 function formHandler(form, message, path, onSuccess) {
@@ -243,7 +279,7 @@ function showProfile() {
         logout.disabled = true;
         try {
             setSession(await request("/api/logout", {}));
-            if (activePanel(version)) panel.close();
+            if (activePanel(version)) navigate("home");
         } catch (error) {
             logoutMessage.textContent = error.message;
         } finally {
@@ -291,8 +327,7 @@ async function showList(reviewer = false) {
 }
 
 export function showHistory(identifier) {
-    if (identifier) showDetails(identifier);
-    else showList();
+    navigate("history", identifier);
 }
 
 async function showDetails(identifier, reviewer = false) {
@@ -368,8 +403,8 @@ function showReviewForm(report, path, version) {
 }
 
 function showAbout() {
-    openPanel("О проекте");
-    panelContent.append(
+    const content = openModalPanel("О проекте");
+    content.append(
         element("p", "«ЧУЖОЕ МЕСТО» помогает сохранять доступность парковочных мест для людей с инвалидностью."),
         element("h3", "Как отправить обращение"),
     );
@@ -379,9 +414,59 @@ function showAbout() {
         "Снимите автомобиль, госномер и парковочный знак. Если всё хорошо видно на одном кадре, второго не нужно.",
         "Отправьте материалы на внутреннюю проверку и смотрите решение в разделе «Мои обращения».",
     ]) steps.append(element("li", step));
-    panelContent.append(steps, element("p", "Результат внутренней проверки описывает качество и содержание материалов."));
+    content.append(steps, element("p", "Результат внутренней проверки описывает качество и содержание материалов."));
 }
 
-$("open-profile").addEventListener("click", () => requireAccount(showProfile));
-$("open-history").addEventListener("click", () => requireAccount(() => showHistory()));
+function tabFromUrl() {
+    const tab = new URL(location.href).searchParams.get("tab");
+    return Object.hasOwn(tabTitles, tab) ? tab : "home";
+}
+
+function renderTab(tab, identifier) {
+    const tabs = Object.keys(tabTitles);
+    const direction = Math.sign(tabs.indexOf(tab) - tabs.indexOf(currentTab));
+    currentTab = tab;
+    afterLogin = null;
+    if (accountDialog.open) accountDialog.close();
+    if (panel.open) panel.close();
+    $("home-content").hidden = tab !== "home";
+    $("tab-screen").hidden = tab === "home";
+    for (const name of tabs) {
+        const control = $("open-" + name);
+        if (name === tab) control.setAttribute("aria-current", "page");
+        else control.removeAttribute("aria-current");
+    }
+    openPanel(tabTitles[tab]);
+    if (direction && window.matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+        const screen = $(tab === "home" ? "home-content" : "tab-screen");
+        for (const animation of screen.getAnimations()) animation.cancel();
+        screen.animate([
+            { opacity: 0.65, transform: `translateX(${direction * 12}px)` },
+            { opacity: 1, transform: "none" },
+        ], { duration: 210, easing: "cubic-bezier(.2,.8,.2,1)" });
+    }
+    if (tab === "home") return;
+    panelContent.append(statusMessage("Загрузка…"));
+    requireAccount(() => {
+        if (tab === "profile") showProfile();
+        else if (identifier) showDetails(identifier);
+        else showList();
+    });
+}
+
+function navigate(tab, identifier) {
+    if (tab !== currentTab) {
+        const url = new URL(location.href);
+        if (tab === "home") url.searchParams.delete("tab");
+        else url.searchParams.set("tab", tab);
+        history.pushState(null, "", url);
+    }
+    renderTab(tab, identifier);
+}
+
+for (const tab of Object.keys(tabTitles)) {
+    $("open-" + tab).addEventListener("click", () => navigate(tab));
+}
+window.addEventListener("popstate", () => renderTab(tabFromUrl()));
 $("open-about").addEventListener("click", showAbout);
+if (tabFromUrl() !== "home") renderTab(tabFromUrl());

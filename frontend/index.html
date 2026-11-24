@@ -3,45 +3,49 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+	<meta name="theme-color" content="#F2FAFA">
 	<link rel="stylesheet" type="text/css" href="style.css">
 	<script src="report.js" type="module"></script>
 	<title>Чужое место — фиксация нарушений парковки на местах для инвалидов</title>
 </head>
 <body>
-	<main>
-		<header>
-			<div>
-				<h1 class="head_text">ЧУЖОЕ МЕСТО</h1>
-				<p class="head_subtext">Сервис доступной среды</p>
-			</div>
-			<button id="open-profile" type="button" class="panel-button">Личный кабинет</button>
+	<main id="home">
+		<header class="app-header">
+			<div class="brand-mark" aria-hidden="true">P</div>
+			<div><h1>Чужое место</h1><p>Сервис доступной среды</p></div>
 		</header>
-		<div class="first_block">
-			<h2>Не занимай чужое место</h2>
-			<p>Помогите сохранить парковочные места для людей с инвалидностью.</p>
-			<p>Город должен быть доступен каждому.</p>
+		<div id="home-content">
+			<section class="hero" aria-labelledby="hero-title">
+				<div class="hero-copy">
+					<h2 id="hero-title">Не занимай<br>чужое место<span>.</span></h2>
+					<p>Помогите сохранить парковочные места для людей с инвалидностью.</p>
+				</div>
+				<img class="parking-scene" src="images/parking-car.webp" alt="Синий автомобиль на парковочном месте для людей с инвалидностью" width="960" height="640">
+				<button id="open-report" type="button" class="report-button">
+					<img src="images/hammer.svg" alt="" width="26" height="26">
+					Сообщить о нарушении <span class="arrow" aria-hidden="true">↗</span>
+				</button>
+			</section>
+			<section class="guide" aria-labelledby="guide-title">
+				<div class="guide-heading"><h2 id="guide-title">Как сообщить</h2>
+					<button id="open-about" type="button">О проекте <span aria-hidden="true">↗</span></button>
+				</div>
+				<ul class="steps">
+					<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.4"/></svg><div><h3>Укажите место</h3><p>Проверьте адрес по геолокации.</p></div></li>
+					<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="3.5"/></svg><div><h3>Сделайте фото</h3><p>Снимите парковочный знак и госномер.</p></div></li>
+					<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 18-7-7 18-3-8-8-3Zm8 3 10-10"/></svg><div><h3>Отправьте обращение</h3><p>Следите за статусом в «Обращениях».</p></div></li>
+				</ul>
+			</section>
 		</div>
-
-		<div class="second_block">
-			<button class="fix_button" id="open-report" type="button">
-				<img class="hammer-icon" src="images/hammer.svg" width="32" height="32" alt="">
-				Сообщить о нарушении
-			</button>
-			<p class="hint_text">Отправить фотографию и адрес</p>
-		</div>
-
-		<div class="container_block">
-			<button class="card" type="button" id="open-history">
-				<img src="images/icons/clipboard.png" alt="" class="card_icon">
-				<span class="card_title">Мои обращения</span>
-				<span class="card_description">История и статусы</span>
-			</button>
-			<button class="card" type="button" id="open-about">
-				<img src="images/icons/info-circle.png" alt="" class="card_icon">
-				<span class="card_title">О проекте</span>
-				<span class="card_description">Как работает сервис</span>
-			</button>
-		</div>
+		<section class="tab-screen" id="tab-screen" aria-labelledby="tab-title" hidden>
+			<h2 id="tab-title"></h2>
+			<div class="panel-stack" id="tab-content"></div>
+		</section>
+		<nav class="tab-bar" aria-label="Основная навигация">
+			<button id="open-home" type="button" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10h-6v-7H9v7H3z"/></svg>Главная</button>
+			<button id="open-history" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 9h6m-6 4h6"/></svg>Обращения</button>
+			<button id="open-profile" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Профиль</button>
+		</nav>
 
 		<dialog class="panel-dialog" id="account-dialog" aria-labelledby="account-title">
 			<div class="panel-heading">
@@ -85,10 +89,17 @@
 					<h3 id="photo-title">Фотографии</h3>
 					<p id="camera-status" role="status">На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля.</p>
 					<div id="camera-view" hidden>
+						<div class="camera-actions camera-toolbar" id="camera-toolbar">
+							<button type="button" id="cancel-camera">Закрыть</button>
+							<button type="button" id="switch-camera">Перевернуть</button>
+						</div>
 						<video id="camera-preview" autoplay muted playsinline></video>
+						<p id="camera-view-status" role="status">Подключаем камеру…</p>
+						<button type="button" id="play-camera" hidden>Запустить предпросмотр</button>
 						<div class="camera-actions">
-							<button type="button" id="cancel-camera">Отмена</button>
-							<button class="primary-button" type="button" id="take-photo" disabled>Сделать снимок</button>
+							<span class="camera-spacer" aria-hidden="true"></span>
+							<button class="primary-button" type="button" id="take-photo" disabled>Сфотографировать</button>
+							<button type="button" id="camera-flash" aria-pressed="false" hidden>Вспышка</button>
 						</div>
 					</div>
 					<div class="report-photos" id="photo-previews" hidden>

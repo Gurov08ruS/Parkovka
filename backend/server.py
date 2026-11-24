@@ -21,6 +21,7 @@ from accounts import (
     COOKIE_NAME, SESSION_SECONDS, clean_text, cookie_token_hash, create_session,
     session_account, user_fields, verify_max,
 )
+from device_logs import create_device_logger, log_camera_error, log_location_error
 from reports import (
     MAX_PHOTO_BYTES, ApiError, change_status, coordinates, create_draft, initialize_database,
     list_reports, open_database, report_detail, report_photo, submit_report,
@@ -62,8 +63,9 @@ def reverse_geocode(latitude, longitude):
 
 
 class AppHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, **kwargs):
+    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, device_logs, **kwargs):
         self.database = database
+        self.device_logs = device_logs
         self.bot_token = bot_token
         self.reviewer_key = reviewer_key
         self.review_grant = hashlib.sha256(reviewer_key.encode()).hexdigest() if reviewer_key else None
@@ -189,7 +191,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         status_route = STATUS_ROUTE.fullmatch(path)
         if path not in {
             "/api/session", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode",
-            REPORTS_PATH, CAPTURE_PATH,
+            "/api/diagnostics/camera", "/api/diagnostics/location", REPORTS_PATH, CAPTURE_PATH,
         } and status_route is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -230,6 +232,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         account = self.account(connection, reviewer=status_route is not None)
+        if path in self.device_logs:
+            logger, record = self.device_logs[path]
+            record(logger, data)
+            self.send_json(HTTPStatus.OK, {"logged": True})
+            return
+
         if path == "/api/profile":
             fields = user_fields(
                 (account["max_id"], data.get("first_name"), data.get("last_name")), test=self.source == "test",
@@ -310,6 +318,10 @@ def main():
     handler = partial(
         AppHandler, database=options.db, bot_token=bot_token, reviewer_key=reviewer_key,
         secure_cookie=tls is not None or bool(bot_token),
+        device_logs={
+            "/api/diagnostics/camera": (create_device_logger(options.db.with_suffix(".camera.log")), log_camera_error),
+            "/api/diagnostics/location": (create_device_logger(options.db.with_suffix(".location.log")), log_location_error),
+        },
     )
     try:
         server = ThreadingHTTPServer((options.host, options.port), handler)

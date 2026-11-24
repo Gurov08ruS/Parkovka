@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 226" fill="none">
+  <defs>
+    <radialGradient id="fade"><stop offset=".48" stop-color="white"/><stop offset="1" stop-color="black"/></radialGradient>
+    <mask id="grid-fade"><rect width="360" height="226" fill="url(#fade)"/></mask>
+    <pattern id="grid" width="21" height="21" patternUnits="userSpaceOnUse"><path d="M21 0H0V21" stroke="#a3d4d5" stroke-width=".6" opacity=".32"/></pattern>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 6 6 0" stroke="#1c5159" stroke-width="1"/></pattern>
+  </defs>
+  <rect width="360" height="226" fill="url(#grid)" mask="url(#grid-fade)"/>
+  <g transform="translate(8 10)">
+    <path d="m28 132 160-80 125 59v8l-160 81-125-60z" fill="#183f46" stroke="#9bc9c7"/>
+    <path d="m28 132 160-80 125 59-160 81z" fill="#407078" stroke="#b4d7d1"/>
+    <path d="m40 126 158 74m-128-89 158 74" stroke="#b4d7d1" stroke-width="1.5" transform="translate(0 -1)" clip-path="url(#road)"/>
+    <defs><clipPath id="road"><path d="m28 132 160-80 125 59-160 81z"/></clipPath></defs>
+    <path d="m55 133 114-57 66 31-114 58z" stroke="#daff82" stroke-width="2.2"/>
+    <path d="m123 164 113-57 17 8-113 57z" fill="url(#hatch)" stroke="#daff82"/>
+    <path d="m170 173 26-13m15-8 26-13m15-8 26-13" stroke="#b4d7d1" stroke-width="2" stroke-linecap="round"/>
+    <path d="m121 147 69-34-8-4-70 34z" fill="#193e46" opacity=".6"/>
+    <path d="m107 144 9-5 10 5-9 5z" fill="#c1ded1"/>
+    <path d="M114 67v76l5 2V66" fill="#a4bfaf" stroke="#1a4245" stroke-width="1.5"/>
+    <path d="m87 33 47-22 6 3v65l-47 22-6-3z" fill="#7f9e51" stroke="#173f40" stroke-width="2" stroke-linejoin="round"/>
+    <g transform="matrix(1 -.46 0 1 93 36)">
+      <rect width="47" height="65" rx="3" fill="#ddfc81" stroke="#183f43" stroke-width="1.6"/>
+      <rect x="3" y="3" width="41" height="59" rx="2" stroke="#385647"/>
+      <path d="M14 32V11h10c11 0 11 15 0 15h-4v6zm6-12h4c4 0 4-4 0-4h-4z" fill="#183f43"/>
+      <g stroke="#183f43" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="22" cy="38" r="2" fill="#183f43"/><path d="m21 43 1 7h7l4 7 3-2m-13-9h5m-10 1a6 6 0 1 0 8 8"/>
+      </g>
+    </g>
+    <g fill="#bde0d5"><circle cx="258" cy="54" r="2"/><circle cx="58" cy="85" r="1.5"/></g>
+    <path d="M260 31v8m-4-4h8m-67 150v8m-4-4h8" stroke="#c5deca" opacity=".8"/>
+  </g>
+</svg>
