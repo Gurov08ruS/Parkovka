@@ -2,15 +2,19 @@
 <html lang="ru">
 <head>
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 	<link rel="stylesheet" type="text/css" href="style.css">
+	<script src="report.js" type="module"></script>
 	<title>Чужое место — фиксация нарушений парковки на местах для инвалидов</title>
 </head>
 <body>
 	<main>
 		<header>
-			<h1 class="head_text">ЧУЖОЕ МЕСТО</h1>
-			<p class="head_subtext">Сервис доступной среды</p>
+			<div>
+				<h1 class="head_text">ЧУЖОЕ МЕСТО</h1>
+				<p class="head_subtext">Сервис доступной среды</p>
+			</div>
+			<button id="open-profile" type="button" class="panel-button">Личный кабинет</button>
 		</header>
 		<div class="first_block">
 			<h2>Не занимай чужое место</h2>
@@ -19,22 +23,90 @@
 		</div>
 
 		<div class="second_block">
-			<button class="fix_button">Сообщить о нарушении</button>
+			<button class="fix_button" id="open-report" type="button">
+				<img class="hammer-icon" src="images/hammer.svg" width="32" height="32" alt="">
+				Сообщить о нарушении
+			</button>
 			<p class="hint_text">Отправить фотографию и адрес</p>
 		</div>
 
 		<div class="container_block">
-			<div class="card">
+			<button class="card" type="button" id="open-history">
 				<img src="images/icons/clipboard.png" alt="" class="card_icon">
-				<h2>Мои обращения</h2>
-				<p>История сообщений</p>
-			</div>
-			<div class="card">
+				<span class="card_title">Мои обращения</span>
+				<span class="card_description">История и статусы</span>
+			</button>
+			<button class="card" type="button" id="open-about">
 				<img src="images/icons/info-circle.png" alt="" class="card_icon">
-				<h2>О проекте</h2>
-				<p>Как работает сервис</p>
-			</div>
+				<span class="card_title">О проекте</span>
+				<span class="card_description">Как работает сервис</span>
+			</button>
 		</div>
+
+		<dialog class="panel-dialog" id="account-dialog" aria-labelledby="account-title">
+			<div class="panel-heading">
+				<h2 id="account-title">Вход</h2>
+				<form method="dialog"><button class="panel-button" type="submit">Закрыть</button></form>
+			</div>
+			<form id="account-form" class="panel-stack">
+				<div id="test-login" class="panel-stack" hidden>
+					<p>Для теста введите ID MAX, имя и фамилию.</p>
+					<label>ID MAX <input name="max_id" inputmode="numeric" pattern="[1-9][0-9]{0,18}" maxlength="19" required></label>
+					<label>Имя <input name="first_name" autocomplete="given-name" maxlength="80" required></label>
+					<label>Фамилия <input name="last_name" autocomplete="family-name" maxlength="80" required></label>
+				</div>
+				<p id="max-login" hidden>Откройте мини-приложение в MAX, чтобы войти.</p>
+				<p id="account-message" role="status"></p>
+				<button class="panel-button primary-button" type="submit" id="account-submit">Войти</button>
+			</form>
+		</dialog>
+
+		<dialog class="panel-dialog" id="panel-dialog" aria-labelledby="panel-title">
+			<div class="panel-heading">
+				<h2 id="panel-title"></h2>
+				<form method="dialog"><button class="panel-button" type="submit">Закрыть</button></form>
+			</div>
+			<div class="panel-stack" id="panel-content"></div>
+		</dialog>
+
+		<dialog class="panel-dialog" id="report-dialog" aria-labelledby="report-title">
+			<form id="report-form">
+				<div class="panel-heading">
+					<h2 id="report-title">Новое обращение</h2>
+					<button type="button" id="close-report">Закрыть</button>
+				</div>
+				<section class="capture-section" aria-labelledby="location-title">
+					<h3 id="location-title">Место</h3>
+					<p id="location-status" role="status">Разрешите доступ к геолокации, чтобы определить адрес.</p>
+					<button type="button" id="locate">Определить местоположение</button>
+					<p class="capture-note">Для поиска адреса координаты передаются сервису Photon. <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
+				</section>
+				<section class="capture-section" aria-labelledby="photo-title">
+					<h3 id="photo-title">Фотографии</h3>
+					<p id="camera-status" role="status">На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля.</p>
+					<div id="camera-view" hidden>
+						<video id="camera-preview" autoplay muted playsinline></video>
+						<div class="camera-actions">
+							<button type="button" id="cancel-camera">Отмена</button>
+							<button class="primary-button" type="button" id="take-photo" disabled>Сделать снимок</button>
+						</div>
+					</div>
+					<div class="report-photos" id="photo-previews" hidden>
+						<figure hidden><img id="photo-preview" alt="Основной снимок"><figcaption>Основной снимок</figcaption></figure>
+						<figure hidden><img id="detail-preview" alt="Дополнительный снимок"><figcaption>Дополнительный снимок</figcaption></figure>
+					</div>
+					<button type="button" id="open-camera">Открыть камеру</button>
+					<button type="button" id="open-detail" hidden disabled>Сделать второе фото</button>
+					<button type="button" id="remove-detail" hidden>Убрать второе фото</button>
+				</section>
+				<label>Комментарий к обращению <textarea id="report-comment" rows="3" maxlength="1000"></textarea></label>
+				<div class="report-actions">
+					<p id="save-status" role="status"></p>
+					<button type="button" id="show-submitted" hidden>Открыть обращение</button>
+					<button type="submit" id="save-report" disabled>Отправить на проверку</button>
+				</div>
+			</form>
+		</dialog>
 	</main>
 </body>
 </html>
