@@ -5,8 +5,9 @@ const accountMessage = $("account-message");
 const accountSubmit = $("account-submit");
 const panel = $("panel-dialog");
 const panelContent = $("tab-content");
-const tabTitles = { home: "Главная", history: "Мои обращения", profile: "Личный кабинет" };
+const tabTitles = { home: "Главная", history: "Мои обращения", achievements: "Мои достижения", profile: "Мой аккаунт" };
 let currentTab = "home";
+let tabAnimation;
 let loginRequest = null;
 const statuses = {
     draft: "Черновик",
@@ -238,7 +239,63 @@ function formHandler(form, message, path, onSuccess) {
 }
 
 function showProfile() {
-    const version = openPanel("Личный кабинет");
+    const version = openPanel("Мой аккаунт");
+    const user = session?.user;
+    const identity = element("div", "", "profile-card");
+    const avatar = element("span", user ? user.first_name.slice(0, 1).toUpperCase() : "○", "profile-avatar");
+    avatar.setAttribute("aria-hidden", "true");
+    const text = element("div");
+    text.append(element("strong", user ? `${user.first_name} ${user.last_name}`.trim() : "Гость"),
+        element("p", user ? `ID MAX: ${user.max_id}` : "Войдите, чтобы отправлять обращения"));
+    identity.append(avatar, text);
+    panelContent.append(identity);
+    const menu = element("div", "", "profile-menu");
+    if (user) menu.append(button("Личные данные  ›", showEditProfile));
+    menu.append(
+        button("Мои достижения  ›", () => navigate("achievements")),
+        button("Черновики  ›", () => navigate("history", null, "drafts")),
+        button("О проекте  ›", showAbout),
+    );
+    panelContent.append(menu);
+
+    if (!user) {
+        panelContent.append(button("Войти в аккаунт", () => requireAccount(showProfile), true));
+        return;
+    }
+    if (user.reviewer) {
+        panelContent.append(button("Очередь проверки", () => showList(true), true));
+    } else if (session.review_enabled) {
+        const review = element("form", "", "panel-stack capture-section");
+        const message = statusMessage();
+        review.append(
+            element("h3", "Вход для проверяющего"),
+            field("Секрет проверяющего", "key", { type: "password", required: true }),
+            submitButton("Войти в очередь проверки"), message,
+        );
+        formHandler(review, message, "/api/reviewer", (data) => {
+            review.reset();
+            setSession(data);
+            if (activePanel(version)) showList(true);
+        });
+        panelContent.append(review);
+    }
+    const logoutMessage = statusMessage();
+    const logout = button("Выйти из аккаунта", async () => {
+        logout.disabled = true;
+        try {
+            setSession(await request("/api/logout", {}));
+            if (activePanel(version)) showProfile();
+        } catch (error) {
+            logoutMessage.textContent = error.message;
+        } finally {
+            logout.disabled = false;
+        }
+    });
+    panelContent.append(logout, logoutMessage);
+}
+
+function showEditProfile() {
+    const version = openPanel("Личные данные");
     const user = session.user;
     const profile = element("form", "", "panel-stack");
     const profileMessage = statusMessage();
@@ -251,42 +308,30 @@ function showProfile() {
     );
     formHandler(profile, profileMessage, "/api/profile", (data) => {
         setSession(data);
-        profileMessage.textContent = "Профиль сохранён.";
+        if (activePanel(version)) showProfile();
     });
-    panelContent.append(profile);
+    panelContent.append(button("Назад", showProfile), profile);
+}
 
-    if (user.reviewer) {
-        panelContent.append(button("Очередь проверки", () => showList(true), true));
-    } else if (session.review_enabled) {
-        const review = element("form", "", "panel-stack capture-section");
-        const message = statusMessage();
-        review.append(
-            element("h3", "Вход для проверяющего"),
-            field("Секрет проверяющего", "key", { type: "password", required: true }),
-            submitButton("Войти в очередь проверки"),
-            message,
-        );
-        formHandler(review, message, "/api/reviewer", (data) => {
-            review.reset();
-            setSession(data);
-            if (activePanel(version)) showList(true);
-        });
-        panelContent.append(review);
+function showAchievements() {
+    openPanel("Мои достижения");
+    panelContent.append(element("p", "Здесь собраны достижения, которые можно получить во время использования сервиса. Начисление достижений находится в разработке."));
+    const grid = element("div", "", "achievement-grid");
+    for (const [icon, title, description] of [
+        ["★", "Первый шаг", "За первое отправленное обращение"],
+        ["◉", "Чёткий кадр", "За два качественных снимка"],
+        ["☁", "Всегда на связи", "За успешную синхронизацию"],
+        ["⌖", "Внимательный наблюдатель", "За точные координаты и время"],
+        ["✓", "Знаю правила", "За ознакомление с правилами сервиса"],
+        ["♡", "Надёжный помощник", "За ответственное использование сервиса"],
+    ]) {
+        const card = element("article", "", "achievement-card");
+        const badge = element("span", icon, "achievement-icon");
+        badge.setAttribute("aria-hidden", "true");
+        card.append(badge, element("strong", title), element("p", description));
+        grid.append(card);
     }
-
-    const logoutMessage = statusMessage();
-    const logout = button("Выйти из аккаунта", async () => {
-        logout.disabled = true;
-        try {
-            setSession(await request("/api/logout", {}));
-            if (activePanel(version)) navigate("home");
-        } catch (error) {
-            logoutMessage.textContent = error.message;
-        } finally {
-            logout.disabled = false;
-        }
-    });
-    panelContent.append(logout, logoutMessage);
+    panelContent.append(grid);
 }
 
 function dateLabel(value) {
@@ -303,23 +348,48 @@ function reportStatus(report) {
     return element("span", statuses[report.status] || report.status, `report-status status-${report.status}`);
 }
 
-async function showList(reviewer = false) {
+async function showList(reviewer = false, filter = "sent") {
     const version = openPanel(reviewer ? "Очередь проверки" : "Мои обращения");
     const message = statusMessage("Загружаем обращения…");
-    panelContent.append(message, button("Обновить список", () => showList(reviewer)));
+    if (!reviewer) {
+        const filters = element("div", "", "report-filter");
+        for (const [name, label] of [["sent", "Отправленные"], ["drafts", "Черновики"]]) {
+            const control = button(label, () => showList(false, name), filter === name);
+            control.setAttribute("aria-pressed", String(filter === name));
+            filters.append(control);
+        }
+        panelContent.append(filters);
+    }
+    panelContent.append(message, button("Обновить список", () => showList(reviewer, filter)));
     try {
         const { reports } = await request(reviewer ? "/api/review" : "/api/reports");
         if (!activePanel(version)) return;
-        if (reports.length === 0) {
-            message.textContent = reviewer ? "В очереди пока нет обращений." : "У вас пока нет обращений.";
+        const visible = reviewer ? reports : reports.filter((report) => (report.status === "draft") === (filter === "drafts"));
+        if (visible.length === 0) {
+            message.classList.add("empty-card");
+            message.textContent = reviewer ? "В очереди пока нет обращений." : filter === "drafts"
+                ? "Черновиков пока нет." : "Пока нет обращений. После отправки здесь появится их история и статус.";
         } else {
             message.remove();
         }
-        for (const report of reports) {
-            const row = button(`№${report.id} · ${placeLabel(report)}`, () => showDetails(report.id, reviewer));
-            row.classList.add("report-row");
-            row.append(reportStatus(report), element("small", dateLabel(report.submitted_at || report.created_at)));
-            panelContent.append(row);
+        for (const report of visible) {
+            const card = element("article", "", "report-card");
+            const heading = element("div", "", "report-card-head");
+            heading.append(element("strong", `Обращение №${report.id}`), reportStatus(report));
+            card.append(heading, element("small", `${placeLabel(report)} · ${dateLabel(report.submitted_at || report.created_at)}`));
+            if (report.has_photo) {
+                const gallery = element("div", "", "report-photos");
+                for (const [exists, kind, alt] of [[report.has_photo, "overview", "Основной снимок"], [report.has_detail_photo, "detail", "Дополнительный снимок"]]) {
+                    if (!exists) continue;
+                    const image = element("img");
+                    image.src = `${reviewer ? "/api/review" : "/api/reports"}/${report.id}/photos/${kind}`;
+                    image.alt = alt;
+                    gallery.append(image);
+                }
+                card.append(gallery);
+            }
+            card.append(button("Подробнее об обращении", () => showDetails(report.id, reviewer, filter)));
+            panelContent.append(card);
         }
     } catch (error) {
         message.textContent = error.message;
@@ -330,10 +400,10 @@ export function showHistory(identifier) {
     navigate("history", identifier);
 }
 
-async function showDetails(identifier, reviewer = false) {
+async function showDetails(identifier, reviewer = false, filter = "sent") {
     const version = openPanel(`Обращение №${identifier}`);
     const message = statusMessage("Загружаем обращение…");
-    panelContent.append(button("К списку", () => showList(reviewer)), message);
+    panelContent.append(button("К списку", () => showList(reviewer, filter)), message);
     const path = `${reviewer ? "/api/review" : "/api/reports"}/${identifier}`;
     try {
         const report = await request(path);
@@ -374,7 +444,7 @@ async function showDetails(identifier, reviewer = false) {
         }
     } catch (error) {
         message.textContent = error.message;
-        if (activePanel(version)) panelContent.append(button("Повторить", () => showDetails(identifier, reviewer)));
+        if (activePanel(version)) panelContent.append(button("Повторить", () => showDetails(identifier, reviewer, filter)));
     }
 }
 
@@ -422,9 +492,11 @@ function tabFromUrl() {
     return Object.hasOwn(tabTitles, tab) ? tab : "home";
 }
 
-function renderTab(tab, identifier) {
+function renderTab(tab, identifier, filter = "sent") {
     const tabs = Object.keys(tabTitles);
-    const direction = Math.sign(tabs.indexOf(tab) - tabs.indexOf(currentTab));
+    const tabIndex = tabs.indexOf(tab);
+    const direction = Math.sign(tabIndex - tabs.indexOf(currentTab));
+    document.querySelector(".tab-bar").style.setProperty("--indicator-offset", `${tabIndex * 100}%`);
     currentTab = tab;
     afterLogin = null;
     if (accountDialog.open) accountDialog.close();
@@ -437,31 +509,42 @@ function renderTab(tab, identifier) {
         else control.removeAttribute("aria-current");
     }
     openPanel(tabTitles[tab]);
-    if (direction && window.matchMedia("(prefers-reduced-motion: no-preference)").matches) {
-        const screen = $(tab === "home" ? "home-content" : "tab-screen");
-        for (const animation of screen.getAnimations()) animation.cancel();
-        screen.animate([
-            { opacity: 0.65, transform: `translateX(${direction * 12}px)` },
-            { opacity: 1, transform: "none" },
-        ], { duration: 210, easing: "cubic-bezier(.2,.8,.2,1)" });
-    }
     if (tab === "home") return;
+    if (direction && window.matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+        tabAnimation?.cancel();
+        tabAnimation = $("tab-screen").animate?.([
+            { opacity: 0.3, transform: `translateX(${direction * 22}px)` },
+            { opacity: 1, transform: "none" },
+        ], { duration: 360, easing: "cubic-bezier(.25,.7,.25,1)" });
+    }
     panelContent.append(statusMessage("Загрузка…"));
+    if (tab === "achievements") {
+        showAchievements();
+        return;
+    }
+    if (tab === "profile") {
+        const version = panelVersion;
+        request("/api/session").then((data) => {
+            if (activePanel(version)) { setSession(data); showProfile(); }
+        }).catch((error) => {
+            if (activePanel(version)) panelContent.replaceChildren(statusMessage(error.message), button("Повторить", () => renderTab("profile")));
+        });
+        return;
+    }
     requireAccount(() => {
-        if (tab === "profile") showProfile();
-        else if (identifier) showDetails(identifier);
-        else showList();
+        if (identifier) showDetails(identifier);
+        else showList(false, filter);
     });
 }
 
-function navigate(tab, identifier) {
+function navigate(tab, identifier, filter) {
     if (tab !== currentTab) {
         const url = new URL(location.href);
         if (tab === "home") url.searchParams.delete("tab");
         else url.searchParams.set("tab", tab);
         history.pushState(null, "", url);
     }
-    renderTab(tab, identifier);
+    renderTab(tab, identifier, filter);
 }
 
 for (const tab of Object.keys(tabTitles)) {

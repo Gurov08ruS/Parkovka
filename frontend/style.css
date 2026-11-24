@@ -93,26 +93,33 @@ main {
 	button { transition: transform 120ms ease-out, box-shadow 160ms ease-out; }
 	button:enabled:active { transform: translateY(1px) scale(.98); }
 
-	.panel-dialog[open] { animation: panel-appear 180ms ease-out; }
-	.panel-dialog[open]::backdrop { animation: panel-appear 180ms ease-out; }
-
-	@supports selector(:has(*)) {
-		.tab-bar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-		.tab-bar::before {
-			content: ""; position: absolute; pointer-events: none;
-			inset: 5px auto 5px 5px; width: calc((100% - 10px) / 3); border-radius: 16px;
-			background: var(--glass-glint), linear-gradient(160deg, #edf8ff, var(--sky));
-			box-shadow: var(--glass-shadow), inset 0 0 0 1px var(--blue);
-			transition: transform 240ms cubic-bezier(.2,.8,.2,1);
-		}
-		.tab-bar:has(#open-history[aria-current])::before { transform: translateX(100%); }
-		.tab-bar:has(#open-profile[aria-current])::before { transform: translateX(200%); }
-		.tab-bar > button { position: relative; }
-		.tab-bar [aria-current] { background: transparent; box-shadow: none; }
-		.tab-bar [aria-current]:not(:focus-visible) { outline: none; }
+	.hero { animation: card-appear 460ms ease-out; }
+	.guide { animation: card-appear 460ms 80ms ease-out backwards; }
+	/* Forms and report rows can arrive after the tab's initial transition. */
+	#tab-content > form, #tab-content > .report-row, #tab-content > [role="status"]:only-child {
+		animation: panel-appear 320ms ease-out;
 	}
+	.panel-dialog[open] { animation: panel-appear 300ms ease-out; }
+	.panel-dialog[open]::backdrop { animation: panel-appear 260ms ease-out; }
+
+	.tab-bar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	.tab-bar::before {
+		content: ""; position: absolute; pointer-events: none;
+		inset: 5px auto 5px 5px; width: calc((100% - 10px) / 4); border-radius: 16px;
+		background: var(--glass-glint), linear-gradient(160deg, #edf8ff, var(--sky));
+		box-shadow: var(--glass-shadow), inset 0 0 0 1px var(--blue);
+		transform: translateX(var(--indicator-offset, 0%));
+		transition: transform 360ms cubic-bezier(.25,.7,.25,1);
+	}
+	.tab-bar > button { position: relative; }
+	.tab-bar [aria-current] { background: transparent; box-shadow: none; }
+	.tab-bar [aria-current]:not(:focus-visible) { outline: none; }
 }
 
+@keyframes card-appear {
+	from { opacity: 0; transform: translateY(18px); }
+	to { opacity: 1; transform: none; }
+}
 @keyframes panel-appear {
 	from { opacity: 0; }
 	to { opacity: 1; }
@@ -149,6 +156,24 @@ main {
 .tab-screen { overflow-wrap: anywhere; }
 .tab-screen h2 { margin-bottom: 18px; font-size: 28px; line-height: 1.2; letter-spacing: -.04em; }
 .tab-screen form { padding: 16px; background: white; border: 1px solid var(--ice); border-radius: 18px; }
+.profile-card, .achievement-card, .empty-card, .report-card {
+	padding: 18px; border: 1px solid var(--ice); border-radius: 18px; background: white;
+}
+.profile-card { display: flex; align-items: center; gap: 14px; }
+.profile-avatar, .achievement-icon {
+	display: grid; place-items: center; flex: none; width: 54px; height: 54px;
+	border-radius: 18px; background: var(--ice); color: var(--deep-blue); font-weight: 700; font-size: 20px;
+}
+.profile-card p, .achievement-card p, .empty-card p, .report-card small { color: var(--muted); font-size: 14px; }
+.profile-menu { display: grid; gap: 8px; }
+.profile-menu .panel-button { width: 100%; text-align: left; }
+.achievement-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.achievement-card { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.report-card { display: grid; gap: 10px; }
+.report-card-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.report-filter { display: flex; gap: 8px; }
+.report-filter button { flex: 1; }
+.empty-card { text-align: center; }
 
 .panel-dialog::backdrop {
 	background: rgb(26 43 60 / 55%);
