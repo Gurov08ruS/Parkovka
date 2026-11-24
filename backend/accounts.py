@@ -5,7 +5,7 @@ import re
 import secrets
 import time
 from http.cookies import CookieError, SimpleCookie
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlsplit
 
 
 COOKIE_NAME = "stukach_session"
@@ -68,7 +68,18 @@ def verify_max(init_data, token):
         raise ValueError("Некорректные данные профиля MAX.") from None
     if not -60 <= time.time() - issued <= SIGNATURE_SECONDS:
         raise ValueError("Срок входа истёк. Откройте мини-приложение заново в MAX.")
-    return user_fields((str(user["id"]), user.get("first_name"), user.get("last_name") or ""), test=False)
+    fields = user_fields((str(user["id"]), user.get("first_name"), user.get("last_name") or ""), test=False)
+    photo_url = user.get("photo_url")
+    if not isinstance(photo_url, str) or len(photo_url) > 2048:
+        photo_url = None
+    if photo_url:
+        try:
+            parsed = urlsplit(photo_url)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+                photo_url = None
+        except ValueError:
+            photo_url = None
+    return fields, photo_url or None
 
 
 def cookie_token_hash(header):
@@ -82,7 +93,7 @@ def cookie_token_hash(header):
     return None
 
 
-def create_session(connection, source, fields, old_token):
+def create_session(connection, source, fields, old_token, photo_url=None):
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(
         """INSERT INTO accounts (source, max_id, first_name, last_name) VALUES (?, ?, ?, ?)
@@ -93,6 +104,8 @@ def create_session(connection, source, fields, old_token):
         "SELECT * FROM accounts WHERE source = ? AND max_id = ?", (source, fields[0]),
     ).fetchone()
     ensure_active(connection, account["id"])
+    if source == "max":
+        connection.execute("UPDATE accounts SET photo_url = ? WHERE id = ?", (photo_url, account["id"]))
     now = int(time.time())
     token = secrets.token_urlsafe(32)
     connection.execute("DELETE FROM sessions WHERE expires_at <= ? OR token_hash = ?", (now, old_token))

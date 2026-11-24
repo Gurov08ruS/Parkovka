@@ -57,6 +57,7 @@ def initialize_database(database):
             connection.execute("ALTER TABLE report_captures_new RENAME TO report_captures")
             connection.execute("PRAGMA user_version = 1")
         for table, columns in (
+            ("accounts", {"photo_url": "TEXT"}),
             ("reports", {"owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT"}),
         ):
             present = {column["name"] for column in connection.execute(f"PRAGMA table_info({table})")}

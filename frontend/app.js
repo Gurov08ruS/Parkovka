@@ -69,6 +69,18 @@ function initData() {
 
 function setSession(data) {
     session = data;
+    const avatar = $("header-profile").querySelector("img");
+    const icon = $("header-profile").querySelector("svg");
+    avatar.onload = null;
+    avatar.onerror = null;
+    avatar.hidden = true;
+    icon.hidden = false;
+    avatar.removeAttribute("src");
+    if (data.user?.photo_url) {
+        avatar.onload = () => { avatar.hidden = false; icon.hidden = true; };
+        avatar.onerror = () => { avatar.hidden = true; icon.hidden = false; };
+        avatar.src = data.user.photo_url;
+    }
     if (data.mode === "max" && initData() && !bridge) {
         bridge = new Promise((resolve) => {
             if (window.WebApp) {
@@ -608,4 +620,8 @@ for (const tab of Object.keys(tabTitles)) {
 window.addEventListener("popstate", () => renderTab(tabFromUrl()));
 $("open-about").addEventListener("click", showAbout);
 $("home-reports").addEventListener("click", () => navigate("history"));
+$("header-profile").addEventListener("click", () => navigate("profile"));
+request("/api/session").then((data) => {
+    if (session === null) setSession(data);
+}).catch(() => {});
 if (tabFromUrl() !== "home") renderTab(tabFromUrl());

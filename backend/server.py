@@ -151,7 +151,7 @@ class AppHandler(SimpleHTTPRequestHandler):
     def session_data(self, account):
         user = None
         if account is not None:
-            user = {field: account[field] for field in ("max_id", "first_name", "last_name")}
+            user = {field: account[field] for field in ("max_id", "first_name", "last_name", "photo_url")}
             user["reviewer"] = self.is_reviewer(account)
         return {"mode": self.source, "review_enabled": bool(self.reviewer_key), "user": user}
 
@@ -261,15 +261,16 @@ class AppHandler(SimpleHTTPRequestHandler):
     def post_api(self, path, status_route, ban_route, data, connection):
         token_hash = cookie_token_hash(self.headers.get("Cookie"))
         if path == "/api/session":
+            photo_url = None
             if self.bot_token:
                 try:
-                    fields = verify_max(data.get("init_data"), self.bot_token)
+                    fields, photo_url = verify_max(data.get("init_data"), self.bot_token)
                 except ValueError as error:
                     raise ApiError(HTTPStatus.UNAUTHORIZED, str(error)) from error
             else:
                 fields = user_fields((data.get("max_id"), data.get("first_name"), data.get("last_name")), test=True)
             with connection:
-                token = create_session(connection, self.source, fields, token_hash)
+                token = create_session(connection, self.source, fields, token_hash, photo_url)
             account = session_account(connection, cookie_token_hash(f"{COOKIE_NAME}={token}"), self.source)
             self.send_json(HTTPStatus.OK, self.session_data(account), self.session_cookie(token, SESSION_SECONDS))
             return

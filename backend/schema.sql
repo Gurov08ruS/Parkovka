@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     max_id TEXT NOT NULL,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
+    photo_url TEXT,
     UNIQUE (source, max_id)
 );
 
