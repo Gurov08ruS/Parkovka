@@ -102,6 +102,11 @@
 					<h3>Проверьте и отправьте обращение</h3>
 					<div class="capture-section">
 						<div class="report-photos" id="review-photos"></div>
+						<div class="plate-field">
+							<label for="plate-number">Госномер автомобиля <span>Необязательно</span></label>
+							<div class="plate-input"><input id="plate-number" type="text" maxlength="32" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="А123ВС 123" aria-describedby="plate-note"><span aria-hidden="true">RU</span></div>
+							<p id="plate-note">Указанный вручную номер не подтверждён.</p>
+						</div>
 						<h3 id="location-title">Местоположение</h3>
 						<p id="location-status" role="status">Разрешите доступ к геолокации, чтобы определить адрес.</p>
 						<button type="button" id="locate">Определить мой адрес</button>

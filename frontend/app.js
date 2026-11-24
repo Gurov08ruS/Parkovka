@@ -405,6 +405,9 @@ async function showList(reviewer = false, filter = "sent") {
             const heading = element("div", "", "report-card-head");
             heading.append(element("strong", `Обращение №${report.id}`), reportStatus(report));
             card.append(heading, element("small", `${placeLabel(report)} · ${dateLabel(report.submitted_at || report.created_at)}`));
+            if (report.plate_number) {
+                card.append(element("p", `Госномер: ${report.plate_number} · Не подтверждён`, "report-plate-summary"));
+            }
             if (report.has_photo) {
                 const gallery = element("div", "", "report-photos");
                 for (const [exists, kind, alt] of [[report.has_photo, "overview", "Основной снимок"], [report.has_detail_photo, "detail", "Дополнительный снимок"]]) {
@@ -444,6 +447,11 @@ async function showDetails(identifier, reviewer = false, filter = "sent") {
             element("p", `Создано ${dateLabel(report.created_at)}`),
         );
         if (report.captured_at) panelContent.append(element("p", `Снято ${dateLabel(report.captured_at)}`));
+        if (report.plate_number) {
+            const plate = element("div", "", "report-plate-summary");
+            plate.append(element("strong", report.plate_number), element("span", "Не подтверждён"));
+            panelContent.append(plate);
+        }
         if (report.comment) panelContent.append(element("p", report.comment, "report-comment"));
         const gallery = element("div", "", "report-photos");
         for (const [exists, kind, label] of [

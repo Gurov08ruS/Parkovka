@@ -239,6 +239,17 @@ main {
 	color: var(--muted);
 }
 
+.plate-field { display: grid; gap: 8px; }
+.plate-field label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.plate-field label span { font-size: 12px; font-weight: 400; color: var(--muted); }
+.plate-input { display: flex; align-items: center; overflow: hidden; border: 2px solid var(--deep-blue); border-radius: 12px; background: white; }
+.plate-input input { border: 0; border-radius: 0; min-width: 0; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }
+.plate-input input:focus-visible { outline-offset: -3px; }
+.plate-input > span { align-self: stretch; display: grid; place-items: center; padding: 0 12px; border-left: 1px solid var(--ice); color: var(--deep-blue); font-size: 13px; font-weight: 700; }
+.plate-field p { color: var(--muted); font-size: 13px; }
+.report-plate-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--deep-blue); overflow-wrap: anywhere; }
+.report-plate-summary span { padding: 3px 8px; border-radius: 12px; background: #FFF0B3; color: #684A00; font-size: 13px; }
+
 .report-actions, .camera-actions {
 	display: flex;
 	flex-wrap: wrap;

@@ -18,7 +18,8 @@ TRANSITIONS = {
     "under_review": {"approved", "rejected"},
 }
 REPORT_QUERY = """
-    SELECT reports.id, reports.status, latitude, longitude, comment, created_at, submitted_at,
+    SELECT reports.id, reports.status, latitude, longitude, plate_number, plate_source, plate_verification,
+           comment, created_at, submitted_at,
            address, captured_at, captures.report_id IS NOT NULL AS has_photo,
            detail_photo IS NOT NULL AS has_detail_photo
     FROM reports LEFT JOIN report_captures AS captures ON captures.report_id = reports.id
@@ -58,7 +59,10 @@ def initialize_database(database):
             connection.execute("PRAGMA user_version = 1")
         for table, columns in (
             ("accounts", {"photo_url": "TEXT"}),
-            ("reports", {"owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT"}),
+            ("reports", {
+                "owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT",
+                "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT",
+            }),
         ):
             present = {column["name"] for column in connection.execute(f"PRAGMA table_info({table})")}
             for name, declaration in columns.items():
@@ -101,11 +105,13 @@ def create_draft(connection, data, owner_id):
     if data.get("latitude") is not None or data.get("longitude") is not None:
         location = coordinates(data)
     comment = clean_text(data.get("comment", ""), "Комментарий", 1000)
+    plate = clean_text(data.get("plate_number", ""), "Госномер", 32).upper() or None
     connection.execute("BEGIN IMMEDIATE")
     ensure_active(connection, owner_id)
     identifier = connection.execute(
-        "INSERT INTO reports (owner_id, latitude, longitude, comment) VALUES (?, ?, ?, ?)",
-        (owner_id, *location, comment),
+        """INSERT INTO reports (owner_id, latitude, longitude, comment, plate_number, plate_source, plate_verification)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (owner_id, *location, comment, plate, "manual" if plate else None, "unverified" if plate else None),
     ).lastrowid
     return report_json(connection.execute(REPORT_QUERY + " WHERE reports.id = ?", (identifier,)).fetchone())
 
@@ -119,6 +125,7 @@ def submit_report(connection, data, owner_id):
     if address is not None:
         address = clean_text(address, "Адрес", 1000) or None
     comment = clean_text(data.get("comment", ""), "Комментарий", 1000)
+    plate = clean_text(data.get("plate_number", ""), "Госномер", 32).upper() or None
     captured_at = data.get("captured_at")
     if captured_at is not None:
         if not isinstance(captured_at, str) or not CAPTURE_TIME.fullmatch(captured_at):
@@ -144,9 +151,10 @@ def submit_report(connection, data, owner_id):
         ).fetchone()), False
 
     identifier = connection.execute(
-        """INSERT INTO reports (owner_id, status, latitude, longitude, comment, submitted_at)
-           VALUES (?, 'pending', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))""",
-        (owner_id, latitude, longitude, comment),
+        """INSERT INTO reports (owner_id, status, latitude, longitude, comment,
+                                plate_number, plate_source, plate_verification, submitted_at)
+           VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))""",
+        (owner_id, latitude, longitude, comment, plate, "manual" if plate else None, "unverified" if plate else None),
     ).lastrowid
     connection.execute(
         """INSERT INTO report_captures (report_id, capture_id, address, photo, detail_photo, captured_at)

@@ -24,6 +24,7 @@ const preview = document.querySelector("#photo-preview");
 const detailPreview = document.querySelector("#detail-preview");
 const photoPreviews = document.querySelector("#photo-previews");
 const comment = document.querySelector("#report-comment");
+const plateNumber = document.querySelector("#plate-number");
 const showSubmitted = document.querySelector("#show-submitted");
 const photoStep = document.querySelector("#photo-step");
 const reviewStep = document.querySelector("#review-step");
@@ -98,6 +99,7 @@ function updateButtons() {
     removeDetail.hidden = cameraActive || step !== 2 || !detailPhoto;
     removeDetail.disabled = cameraButton.disabled;
     comment.disabled = saving || saved;
+    plateNumber.disabled = saving || saved;
     const cameraBusy = openingCamera || capturing || changingFlash;
     takeButton.disabled = cameraBusy || !stream || !playButton.hidden || !hasCameraFrame();
     cameraToolbar.hidden = !cameraActive && !lastCamera;
@@ -152,6 +154,7 @@ function clearDraft() {
     preview.removeAttribute("src");
     detailPreview.removeAttribute("src");
     comment.value = "";
+    plateNumber.value = "";
     locateButton.textContent = "Определить местоположение";
     cameraButton.textContent = "Открыть камеру";
     detailButton.textContent = "Сделать второе фото";
@@ -543,7 +546,7 @@ async function saveReport(event) {
     try {
         const result = await request("/api/reports/capture", {
             ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
-            comment: comment.value, capture_id: captureId,
+            comment: comment.value, plate_number: plateNumber.value, capture_id: captureId,
         });
         submittedId = result.id;
         saveStatus.textContent = `Обращение №${result.id} принято на внутреннюю проверку.`;
@@ -589,6 +592,7 @@ removeDetail.addEventListener("click", () => {
     stopCamera();
 });
 comment.addEventListener("input", () => { captureId = null; });
+plateNumber.addEventListener("input", () => { captureId = null; });
 showSubmitted.addEventListener("click", () => {
     const identifier = submittedId;
     dialog.close();
