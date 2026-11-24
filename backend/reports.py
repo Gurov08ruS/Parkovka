@@ -10,7 +10,7 @@ from database import open_database
 
 
 SCHEMA = Path(__file__).with_name("schema.sql")
-MAX_PHOTO_BYTES = 2 * 1024 * 1024
+MAX_PHOTO_BYTES = 64 * 1024 * 1024
 CAPTURE_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 CAPTURE_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z")
 TRANSITIONS = {
@@ -36,12 +36,28 @@ def initialize_database(database):
     with closing(open_database(database)) as connection, connection:
         connection.executescript(SCHEMA.read_text(encoding="utf-8"))
         connection.execute("BEGIN IMMEDIATE")
+        if connection.execute("PRAGMA user_version").fetchone()[0] < 1:
+            columns = {column["name"] for column in connection.execute("PRAGMA table_info(report_captures)")}
+            if "detail_photo" not in columns:
+                connection.execute("ALTER TABLE report_captures ADD COLUMN detail_photo BLOB")
+            if "captured_at" not in columns:
+                connection.execute("ALTER TABLE report_captures ADD COLUMN captured_at TEXT")
+            connection.execute("""CREATE TABLE report_captures_new (
+                report_id INTEGER PRIMARY KEY REFERENCES reports(id) ON DELETE CASCADE,
+                capture_id TEXT NOT NULL UNIQUE,
+                address TEXT,
+                photo BLOB NOT NULL CHECK (length(photo) BETWEEN 4 AND 67108864),
+                detail_photo BLOB CHECK (length(detail_photo) BETWEEN 4 AND 67108864),
+                captured_at TEXT
+            )""")
+            connection.execute("""INSERT INTO report_captures_new
+                (report_id, capture_id, address, photo, detail_photo, captured_at)
+                SELECT report_id, capture_id, address, photo, detail_photo, captured_at FROM report_captures""")
+            connection.execute("DROP TABLE report_captures")
+            connection.execute("ALTER TABLE report_captures_new RENAME TO report_captures")
+            connection.execute("PRAGMA user_version = 1")
         for table, columns in (
             ("reports", {"owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT"}),
-            ("report_captures", {
-                "detail_photo": "BLOB CHECK (length(detail_photo) BETWEEN 4 AND 2097152)",
-                "captured_at": "TEXT",
-            }),
         ):
             present = {column["name"] for column in connection.execute(f"PRAGMA table_info({table})")}
             for name, declaration in columns.items():
@@ -65,9 +81,10 @@ def decode_photo(value):
         image = base64.b64decode(value, validate=True)
     except ValueError:
         raise ValueError("Некорректный снимок.") from None
-    if not (4 <= len(image) <= MAX_PHOTO_BYTES
-            and image.startswith(b"\xff\xd8\xff") and image.endswith(b"\xff\xd9")):
-        raise ValueError("Загрузите снимки JPEG размером до 2 МБ каждый.")
+    jpeg = image.startswith(b"\xff\xd8\xff") and image.endswith(b"\xff\xd9")
+    png = image.startswith(b"\x89PNG\r\n\x1a\n") and image.endswith(b"\x00\x00\x00\x00IEND\xaeB\x60\x82")
+    if not (4 <= len(image) <= MAX_PHOTO_BYTES and (jpeg or png)):
+        raise ValueError("Ожидается снимок PNG или JPEG размером до 64 МБ.")
     return image
 
 

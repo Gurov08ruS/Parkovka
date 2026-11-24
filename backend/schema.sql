@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS report_captures (
     report_id INTEGER PRIMARY KEY REFERENCES reports(id) ON DELETE CASCADE,
     capture_id TEXT NOT NULL UNIQUE,
     address TEXT,
-    photo BLOB NOT NULL CHECK (length(photo) BETWEEN 4 AND 2097152),
-    detail_photo BLOB CHECK (length(detail_photo) BETWEEN 4 AND 2097152),
+    photo BLOB NOT NULL CHECK (length(photo) BETWEEN 4 AND 67108864),
+    detail_photo BLOB CHECK (length(detail_photo) BETWEEN 4 AND 67108864),
     captured_at TEXT
 );
 

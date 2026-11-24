@@ -449,25 +449,24 @@ function takePhoto() {
         return;
     }
 
-    const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     let image;
     try {
         canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-        image = canvas.toDataURL("image/jpeg", 0.85);
+        image = canvas.toDataURL("image/png");
     } catch (error) {
         const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
         cameraFailure("capture", code, "Не удалось сохранить кадр. Попробуйте ещё раз.");
         return;
     }
     const encoded = image.split(",", 2)[1];
-    if (!image.startsWith("data:image/jpeg;base64,")) {
-        cameraFailure("capture", "invalid_jpeg", "Не удалось создать снимок JPEG. Попробуйте ещё раз.");
+    if (!image.startsWith("data:image/png;base64,")) {
+        cameraFailure("capture", "invalid_image", "Не удалось создать снимок PNG. Попробуйте ещё раз.");
         return;
     }
-    if (!encoded || encoded.length * 3 / 4 > 2 * 1024 * 1024 + 2) {
+    if (!encoded || encoded.length * 3 / 4 > 64 * 1024 * 1024 + 2) {
         cameraFailure("capture", "photo_too_large", "Снимок слишком большой. Попробуйте ещё раз.");
         return;
     }

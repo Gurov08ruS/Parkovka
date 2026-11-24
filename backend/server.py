@@ -222,7 +222,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         identifier = int(route[2])
         if route[3]:
             image = report_photo(connection, identifier, route[3], account, reviewer)
-            self.send_data(HTTPStatus.OK, image, "image/jpeg")
+            content_type = "image/png" if image.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg"
+            self.send_data(HTTPStatus.OK, image, content_type)
         else:
             self.send_json(HTTPStatus.OK, report_detail(connection, identifier, account, reviewer))
 

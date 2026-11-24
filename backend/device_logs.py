@@ -7,7 +7,7 @@ from time import gmtime
 STAGES = {"context", "max_permissions", "stream", "preview", "capture", "switch", "flash"}
 CODES = {
     "insecure_context", "api_unavailable", "document_hidden", "track_ended", "preview_timeout",
-    "video_error", "frame_unavailable", "invalid_jpeg", "photo_too_large",
+    "video_error", "frame_unavailable", "invalid_jpeg", "invalid_image", "photo_too_large",
     "AbortError", "InvalidStateError", "NotAllowedError", "NotFoundError", "NotReadableError",
     "NotSupportedError", "OverconstrainedError", "SecurityError", "TypeError", "UnknownError",
     "MaxAppPermissionDenied", "MaxSystemPermissionDenied", "MaxPermissionError",
