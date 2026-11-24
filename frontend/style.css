@@ -21,7 +21,7 @@ body {
 	color: var(--ink);
 	line-height: 1.48;
 }
-button { font: inherit; cursor: pointer; }
+button { font: inherit; font-weight: 400; cursor: pointer; }
 button, a { touch-action: manipulation; }
 :focus-visible { outline: 3px solid var(--strong-blue); outline-offset: 3px; }
 main {
@@ -51,17 +51,17 @@ main {
 	background: linear-gradient(100deg, #E84A69, #CC446E);
 	border: 0; box-shadow: 0 4px 12px #10274338;
 	border-radius: 14px; padding: 15px 18px;
-	color: white; font-weight: 720; font-size: 17px; text-align: center;
+	color: white; font-size: 17px; text-align: center;
 }
 .report-button:hover { box-shadow: 0 4px 16px #10274355; }
 .home-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
-.home-tile { display: grid; gap: 8px; justify-items: start; min-height: 86px; padding: 15px; border: 0; border-radius: 19px; background: #ffffffeb; color: var(--deep-blue); box-shadow: 0 8px 22px #286aa51f; text-align: left; font-weight: 700; }
+.home-tile { display: grid; gap: 8px; justify-items: start; min-height: 86px; padding: 15px; border: 0; border-radius: 19px; background: #ffffffeb; color: var(--deep-blue); box-shadow: 0 8px 22px #286aa51f; text-align: left; }
 .home-tile img { width: 25px; height: 25px; object-fit: contain; }
 .home-note { margin-top: 13px; padding: 17px; border-radius: 22px; background: #ffffffdb; box-shadow: 0 8px 22px #286aa51f; text-align: center; font-weight: 700; }
 .guide { margin-top: 26px; }
 .guide-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
 .guide h2, .panel-heading h2 { font-size: 24px; line-height: 1.16; letter-spacing: -.04em; }
-.guide-heading button { border: 0; border-radius: 14px; padding-inline: 12px; background: var(--glass-surface); box-shadow: 0 3px 9px #19539214; color: var(--deep-blue); min-height: 44px; font-weight: 650; font-size: 14px; }
+.guide-heading button { border: 0; border-radius: 14px; padding-inline: 12px; background: var(--glass-surface); box-shadow: 0 3px 9px #19539214; color: var(--deep-blue); min-height: 44px; font-size: 14px; }
 .steps { list-style: none; border: 1px solid var(--ice); background: white; border-radius: 20px; padding: 0 18px; }
 .steps li { display: flex; gap: 15px; align-items: center; padding: 16px 0; }
 .steps li + li { border-top: 1px solid #deedf5; }
@@ -82,7 +82,7 @@ main {
 .tab-bar > * {
 	display: grid; place-content: center; justify-items: center; gap: 3px; flex: 1; min-width: 0; height: 52px;
 	background: transparent; border: 0; border-radius: 16px; color: var(--muted);
-	line-height: 1.25; font-family: inherit; font-size: 12px; font-weight: 600; text-decoration: none;
+	line-height: 1.25; font-family: inherit; font-size: 12px; font-weight: 400; text-decoration: none;
 }
 .tab-bar svg { width: 21px; height: 21px; }
 .tab-bar > :hover { background: #ffffff94; }
@@ -288,7 +288,7 @@ main {
 	box-shadow: 0 3px 9px #19539214;
 	color: var(--deep-blue);
 	font: inherit;
-	font-weight: 600;
+	font-weight: 400;
 	cursor: pointer;
 }
 
