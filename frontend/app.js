@@ -360,7 +360,7 @@ async function showList(reviewer = false, filter = "sent") {
         }
         panelContent.append(filters);
     }
-    panelContent.append(message, button("Обновить список", () => showList(reviewer, filter)));
+    panelContent.append(message);
     try {
         const { reports } = await request(reviewer ? "/api/review" : "/api/reports");
         if (!activePanel(version)) return;
@@ -393,6 +393,7 @@ async function showList(reviewer = false, filter = "sent") {
         }
     } catch (error) {
         message.textContent = error.message;
+        if (activePanel(version)) panelContent.append(button("Повторить", () => showList(reviewer, filter)));
     }
 }
 

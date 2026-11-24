@@ -1,12 +1,12 @@
 import base64
 import re
-import sqlite3
 from contextlib import closing
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 
 from accounts import clean_text
+from database import open_database
 
 
 SCHEMA = Path(__file__).with_name("schema.sql")
@@ -29,13 +29,6 @@ class ApiError(Exception):
     def __init__(self, status, message):
         super().__init__(message)
         self.status = status
-
-
-def open_database(database):
-    connection = sqlite3.connect(database)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
 
 
 def initialize_database(database):

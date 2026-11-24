@@ -6,8 +6,9 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 import ssl
+import subprocess
+import sys
 from contextlib import closing
 from functools import partial
 from http import HTTPStatus
@@ -22,6 +23,24 @@ from accounts import (
     session_account, user_fields, verify_max,
 )
 from device_logs import create_device_logger, log_camera_error, log_location_error
+
+try:
+    import sqlcipher3
+except ModuleNotFoundError as error:
+    if error.name != "sqlcipher3":
+        raise
+    project = Path(__file__).resolve().parent.parent
+    environment = project / ".venv"
+    interpreter = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if interpreter.is_file() and Path(sys.prefix).resolve() != environment.resolve():
+        os.execv(str(interpreter), [str(interpreter), str(Path(__file__).resolve()), *sys.argv[1:]])
+    raise SystemExit(
+        "Не установлен SQLCipher. Выполните из папки проекта:\n"
+        "python3 -m venv .venv\n"
+        ".venv/bin/pip install -r requirements.txt"
+    ) from None
+
+from database import ensure_key, migrate_plaintext, sqlite3
 from reports import (
     MAX_PHOTO_BYTES, ApiError, change_status, coordinates, create_draft, initialize_database,
     list_reports, open_database, report_detail, report_photo, submit_report,
@@ -37,8 +56,29 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
 PHOTON_URL = os.environ.get("STUKACH_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
-DEFAULT_DATABASE = Path(__file__).parent / "data" / "stukach.sqlite3"
+DEFAULT_DATABASE = Path(__file__).parent / "data" / "stukach.encrypted.sqlite3"
+LEGACY_DATABASE = Path(__file__).parent / "data" / "stukach.sqlite3"
 FRONTEND = Path(__file__).parent.parent / "frontend"
+
+
+def port_owners(port):
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", "-Fpc", f"-iTCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    owners = []
+    pid = None
+    for line in result.stdout.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = line[1:]
+        elif line.startswith("c") and pid:
+            name = "".join(char for char in line[1:] if char.isprintable())[:100]
+            owners.append(f"{name or 'процесс'} (PID {pid})")
+            pid = None
+    return owners
 
 
 def reverse_geocode(latitude, longitude):
@@ -297,6 +337,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="IP-адрес для прослушивания")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--db", type=Path, default=DEFAULT_DATABASE)
+    parser.add_argument("--migrate-from", type=Path, help="Скопировать SQLite в новую зашифрованную базу")
     parser.add_argument("--cert", type=Path, help="Сертификат HTTPS в формате PEM")
     parser.add_argument("--key", type=Path, help="Ключ сертификата HTTPS")
     options = parser.parse_args()
@@ -314,6 +355,14 @@ def main():
     if not bot_token and not reviewer_key:
         reviewer_key = generated_key = secrets.token_urlsafe(18)
 
+    options.db.parent.mkdir(parents=True, exist_ok=True)
+    source = options.migrate_from
+    if source is None and options.db == DEFAULT_DATABASE and not options.db.exists() and LEGACY_DATABASE.exists():
+        source = LEGACY_DATABASE
+    if source is not None:
+        migrate_plaintext(source, options.db)
+        print(f"Зашифрованная копия создана: {options.db}", flush=True)
+    ensure_key(options.db)
     initialize_database(options.db)
     handler = partial(
         AppHandler, database=options.db, bot_token=bot_token, reviewer_key=reviewer_key,
@@ -328,9 +377,11 @@ def main():
     except OSError as error:
         if error.errno != errno.EADDRINUSE:
             raise
+        owners = port_owners(options.port)
+        detail = f"\nЗанимают порт: {', '.join(owners)}." if owners else "\nНе удалось определить процесс."
         raise SystemExit(
-            f"Порт {options.port} уже занят. Остановите запущенный сервер "
-            "или укажите свободный порт через --port."
+            f"Порт {options.port} уже занят.{detail}\n"
+            "Остановите нужный процесс или укажите свободный порт через --port."
         ) from None
 
     with server:
