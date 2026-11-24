@@ -11,7 +11,6 @@
 <body>
 	<main id="home">
 		<header class="app-header">
-			<div class="brand-mark" aria-hidden="true">P</div>
 			<div><h1>Чужое место</h1><p>Сервис доступной среды</p></div>
 		</header>
 		<div id="home-content">
@@ -24,21 +23,13 @@
 					<img class="parking-car" src="images/reference-car.png" alt="Автомобиль на парковочном месте для людей с инвалидностью" width="1120" height="1024">
 					<img class="parking-warning" src="images/exclamation.png" alt="" width="375" height="726">
 				</div>
-				<button id="open-report" type="button" class="report-button">
-					<img src="images/hammer.svg" alt="" width="26" height="26">
-					Зафиксировать о нарушении <span class="arrow" aria-hidden="true">↗</span>
-				</button>
 			</section>
-			<section class="guide" aria-labelledby="guide-title">
-				<div class="guide-heading"><h2 id="guide-title">Как сообщить</h2>
-					<button id="open-about" type="button">О проекте <span aria-hidden="true">↗</span></button>
-				</div>
-				<ul class="steps">
-					<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.4"/></svg><div><h3>Укажите место</h3><p>Проверьте адрес по геолокации.</p></div></li>
-					<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="3.5"/></svg><div><h3>Сделайте фото</h3><p>Снимите парковочный знак и госномер.</p></div></li>
-					<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 18-7-7 18-3-8-8-3Zm8 3 10-10"/></svg><div><h3>Отправьте обращение</h3><p>Следите за статусом в «Обращениях».</p></div></li>
-				</ul>
-			</section>
+			<button id="open-report" type="button" class="report-button">Зафиксировать нарушение</button>
+			<div class="home-tiles">
+				<button id="home-reports" type="button" class="home-tile"><img src="images/icons/clipboard.png" alt="">Мои обращения</button>
+				<button id="open-about" type="button" class="home-tile"><img src="images/icons/info-circle.png" alt="">О проекте</button>
+			</div>
+			<div class="home-note">Ваше внимание помогает сохранять доступность.</div>
 		</div>
 		<section class="tab-screen" id="tab-screen" aria-labelledby="tab-title" hidden>
 			<h2 id="tab-title"></h2>
@@ -80,45 +71,59 @@
 		<dialog class="panel-dialog" id="report-dialog" aria-labelledby="report-title">
 			<form id="report-form">
 				<div class="panel-heading">
-					<h2 id="report-title">Новое обращение</h2>
+					<h2 id="report-title">Фиксация нарушения</h2>
 					<button type="button" id="close-report">Закрыть</button>
 				</div>
-				<section class="capture-section" aria-labelledby="location-title">
-					<h3 id="location-title">Место</h3>
-					<p id="location-status" role="status">Разрешите доступ к геолокации, чтобы определить адрес.</p>
-					<button type="button" id="locate">Определить местоположение</button>
-					<p class="capture-note">Для поиска адреса координаты передаются сервису Photon. <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
-				</section>
-				<section class="capture-section" aria-labelledby="photo-title">
-					<h3 id="photo-title">Фотографии</h3>
-					<p id="camera-status" role="status">На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля.</p>
-					<div id="camera-view" hidden>
-						<div class="camera-actions camera-toolbar" id="camera-toolbar">
-							<button type="button" id="cancel-camera">Закрыть</button>
-							<button type="button" id="switch-camera">Перевернуть</button>
+				<div class="step-label"><span id="step-count">Шаг 1 из 3</span><span id="step-name">Общий вид</span></div>
+				<div class="step-progress" role="progressbar" aria-label="Этап обращения" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1"><span id="step-progress"></span></div>
+				<section id="photo-step">
+					<h3 id="photo-title">Сделайте фото автомобиля на парковочном месте</h3>
+					<p id="camera-status" role="status">В кадре должны быть видны автомобиль, парковочное место и знак или разметка.</p>
+					<div class="photo-box">
+						<div id="photo-placeholder" class="photo-placeholder"><span aria-hidden="true">▣</span>Камера откроется после нажатия кнопки</div>
+						<div class="report-photos" id="photo-previews" hidden>
+							<figure hidden><img id="photo-preview" alt="Общий вид автомобиля"><figcaption>Общий вид</figcaption></figure>
+							<figure hidden><img id="detail-preview" alt="Государственный номер"><figcaption>Государственный номер</figcaption></figure>
 						</div>
-						<video id="camera-preview" autoplay muted playsinline></video>
-						<p id="camera-view-status" role="status">Подключаем камеру…</p>
-						<button type="button" id="play-camera" hidden>Запустить предпросмотр</button>
-						<div class="camera-actions">
-							<span class="camera-spacer" aria-hidden="true"></span>
-							<button class="primary-button" type="button" id="take-photo" disabled>Сфотографировать</button>
-							<button type="button" id="camera-flash" aria-pressed="false" hidden>Вспышка</button>
-						</div>
-					</div>
-					<div class="report-photos" id="photo-previews" hidden>
-						<figure hidden><img id="photo-preview" alt="Основной снимок"><figcaption>Основной снимок</figcaption></figure>
-						<figure hidden><img id="detail-preview" alt="Дополнительный снимок"><figcaption>Дополнительный снимок</figcaption></figure>
 					</div>
 					<button type="button" id="open-camera">Открыть камеру</button>
-					<button type="button" id="open-detail" hidden disabled>Сделать второе фото</button>
+					<button type="button" id="open-detail" hidden>Открыть камеру</button>
 					<button type="button" id="remove-detail" hidden>Убрать второе фото</button>
+					<button type="button" id="next-step" disabled>К следующему фото</button>
+					<button type="button" id="skip-detail" hidden>Продолжить с одним фото</button>
+					<button type="button" id="previous-step" hidden>Назад</button>
+					<p class="capture-note">Фотографии делаются с камеры в приложении.</p>
 				</section>
-				<label>Комментарий к обращению <textarea id="report-comment" rows="3" maxlength="1000"></textarea></label>
-				<div class="report-actions">
-					<p id="save-status" role="status"></p>
-					<button type="button" id="show-submitted" hidden>Открыть обращение</button>
-					<button type="submit" id="save-report" disabled>Отправить на проверку</button>
+				<section id="review-step" hidden>
+					<h3>Проверьте и отправьте обращение</h3>
+					<div class="capture-section">
+						<div class="report-photos" id="review-photos"></div>
+						<h3 id="location-title">Местоположение</h3>
+						<p id="location-status" role="status">Разрешите доступ к геолокации, чтобы определить адрес.</p>
+						<button type="button" id="locate">Определить мой адрес</button>
+						<p class="capture-note">Для поиска адреса координаты передаются сервису Photon. <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
+						<label>Комментарий к обращению <textarea id="report-comment" rows="3" maxlength="1000"></textarea></label>
+					</div>
+					<div class="report-actions">
+						<p id="save-status" role="status"></p>
+						<button type="button" id="show-submitted" hidden>Открыть обращение</button>
+						<button type="submit" id="save-report" disabled>Отправить обращение</button>
+						<button type="button" id="back-to-photos">Вернуться к фотографиям</button>
+					</div>
+				</section>
+				<div id="camera-view" hidden>
+					<div class="camera-actions camera-toolbar" id="camera-toolbar">
+						<button type="button" id="cancel-camera">Закрыть</button>
+						<button type="button" id="switch-camera">Перевернуть</button>
+					</div>
+					<video id="camera-preview" autoplay muted playsinline></video>
+					<p id="camera-view-status" role="status">Подключаем камеру…</p>
+					<button type="button" id="play-camera" hidden>Запустить предпросмотр</button>
+					<div class="camera-actions">
+						<span class="camera-spacer" aria-hidden="true"></span>
+						<button class="primary-button" type="button" id="take-photo" disabled>Сфотографировать</button>
+						<button type="button" id="camera-flash" aria-pressed="false" hidden>Вспышка</button>
+					</div>
 				</div>
 			</form>
 		</dialog>

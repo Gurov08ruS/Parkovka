@@ -25,6 +25,13 @@ const detailPreview = document.querySelector("#detail-preview");
 const photoPreviews = document.querySelector("#photo-previews");
 const comment = document.querySelector("#report-comment");
 const showSubmitted = document.querySelector("#show-submitted");
+const photoStep = document.querySelector("#photo-step");
+const reviewStep = document.querySelector("#review-step");
+const placeholder = document.querySelector("#photo-placeholder");
+const nextStep = document.querySelector("#next-step");
+const previousStep = document.querySelector("#previous-step");
+const skipDetail = document.querySelector("#skip-detail");
+const reviewPhotos = document.querySelector("#review-photos");
 
 const locationPrompt = "Разрешите доступ к геолокации, чтобы определить адрес.";
 const photoPrompt = "На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля.";
@@ -45,6 +52,7 @@ const cameraMessages = new Map([
 ]);
 
 let session = 0;
+let step = 1;
 let position = null;
 let address = null;
 let photo = null;
@@ -83,11 +91,11 @@ function updateButtons() {
     const saved = submittedId !== null;
     const cameraActive = Boolean(stream);
     locateButton.disabled = locating || saving || saved;
-    cameraButton.hidden = cameraActive;
+    cameraButton.hidden = cameraActive || step !== 1;
     cameraButton.disabled = openingCamera || cameraActive || saving || saved;
-    detailButton.hidden = cameraActive || !photo;
+    detailButton.hidden = cameraActive || step !== 2;
     detailButton.disabled = cameraButton.disabled || !photo;
-    removeDetail.hidden = cameraActive || !detailPhoto;
+    removeDetail.hidden = cameraActive || step !== 2 || !detailPhoto;
     removeDetail.disabled = cameraButton.disabled;
     comment.disabled = saving || saved;
     const cameraBusy = openingCamera || capturing || changingFlash;
@@ -102,6 +110,19 @@ function updateButtons() {
     saveButton.disabled = !position || !photo || locating || openingCamera || cameraActive || saving || saved;
     saveButton.hidden = saved;
     showSubmitted.hidden = !saved;
+    nextStep.disabled = openingCamera || saving || (step === 1 ? !photo : !detailPhoto);
+    nextStep.hidden = step === 3;
+    skipDetail.hidden = step !== 2 || Boolean(detailPhoto);
+    skipDetail.disabled = openingCamera || saving;
+    previousStep.hidden = step !== 2;
+    previousStep.disabled = openingCamera || saving;
+    const backToPhotos = document.querySelector("#back-to-photos");
+    backToPhotos.hidden = saved;
+    backToPhotos.disabled = saving;
+    photoPreviews.hidden = step === 3 || !(step === 1 ? photo : detailPhoto);
+    preview.closest("figure").hidden = step !== 1 || !photo;
+    detailPreview.closest("figure").hidden = step !== 2 || !detailPhoto;
+    placeholder.hidden = !photoPreviews.hidden;
 }
 
 function hasCameraFrame() {
@@ -118,14 +139,12 @@ function stopCamera() {
     flashAvailable = false;
     playButton.hidden = true;
     cameraView.hidden = true;
-    photoPreviews.hidden = !photo;
-    preview.closest("figure").hidden = !photo;
-    detailPreview.closest("figure").hidden = !detailPhoto;
     updateButtons();
 }
 
 function clearDraft() {
     session += 1;
+    step = 1;
     position = address = photo = detailPhoto = capturedAt = captureId = submittedId = null;
     locating = openingCamera = saving = false;
     lastCamera = null;
@@ -139,6 +158,33 @@ function clearDraft() {
     locationStatus.textContent = locationPrompt;
     cameraStatus.textContent = photoPrompt;
     saveStatus.textContent = "";
+    showStep(1);
+}
+
+function showStep(value) {
+    step = value;
+    photoStep.hidden = step === 3;
+    reviewStep.hidden = step !== 3;
+    document.querySelector("#step-count").textContent = `Шаг ${step} из 3`;
+    document.querySelector("#step-name").textContent = ["Общий вид", "Государственный номер", "Проверка"][step - 1];
+    document.querySelector(".step-progress").setAttribute("aria-valuenow", String(step));
+    document.querySelector("#step-progress").style.width = `${step * 100 / 3}%`;
+    document.querySelector("#photo-title").textContent = step === 1
+        ? "Сделайте фото автомобиля на парковочном месте" : "Сделайте фото государственного номера";
+    cameraStatus.textContent = step === 1
+        ? "В кадре должны быть видны автомобиль, парковочное место и знак или разметка."
+        : "На снимке должен быть чётко виден номер этого же автомобиля.";
+    nextStep.textContent = step === 1 ? "К следующему фото" : "Перейти к проверке";
+    reviewPhotos.replaceChildren();
+    for (const [source, label] of [[photo && preview.src, "Фото автомобиля"], [detailPhoto && detailPreview.src, "Фото номера"]]) {
+        if (!source) continue;
+        const image = document.createElement("img");
+        image.src = source;
+        image.alt = label;
+        reviewPhotos.append(image);
+    }
+    updateButtons();
+    dialog.scrollTop = 0;
 }
 
 function getPosition(enableHighAccuracy) {
@@ -284,7 +330,6 @@ async function showCamera(activeStream, current) {
         }
     });
     cameraView.hidden = false;
-    photoPreviews.hidden = true;
     video.defaultMuted = video.muted = true;
     video.srcObject = activeStream;
     cameraStatus.textContent = "Камера подключена. Ждём первый кадр…";
@@ -533,6 +578,10 @@ for (const eventName of ["dragover", "drop"]) {
 locateButton.addEventListener("click", locate);
 cameraButton.addEventListener("click", () => openCamera("overview"));
 detailButton.addEventListener("click", () => openCamera("detail"));
+nextStep.addEventListener("click", () => showStep(step + 1));
+skipDetail.addEventListener("click", () => showStep(3));
+previousStep.addEventListener("click", () => showStep(1));
+document.querySelector("#back-to-photos").addEventListener("click", () => showStep(2));
 removeDetail.addEventListener("click", () => {
     detailPhoto = captureId = null;
     detailPreview.removeAttribute("src");

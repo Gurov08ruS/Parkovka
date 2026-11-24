@@ -14,6 +14,17 @@ SIGNATURE_SECONDS = 60 * 60
 MAX_ID = re.compile(r"[1-9][0-9]{0,18}")
 
 
+class AccountBanned(Exception):
+    pass
+
+
+def ensure_active(connection, account_id):
+    if connection.execute(
+        "SELECT 1 FROM account_bans WHERE account_id = ? AND active = 1", (account_id,),
+    ).fetchone():
+        raise AccountBanned("Аккаунт заблокирован проверяющим.")
+
+
 def clean_text(value, label, limit, *, required=False):
     if not isinstance(value, str):
         raise ValueError(f"{label}: ожидается текст.")
@@ -72,6 +83,7 @@ def cookie_token_hash(header):
 
 
 def create_session(connection, source, fields, old_token):
+    connection.execute("BEGIN IMMEDIATE")
     connection.execute(
         """INSERT INTO accounts (source, max_id, first_name, last_name) VALUES (?, ?, ?, ?)
            ON CONFLICT (source, max_id) DO NOTHING""",
@@ -80,6 +92,7 @@ def create_session(connection, source, fields, old_token):
     account = connection.execute(
         "SELECT * FROM accounts WHERE source = ? AND max_id = ?", (source, fields[0]),
     ).fetchone()
+    ensure_active(connection, account["id"])
     now = int(time.time())
     token = secrets.token_urlsafe(32)
     connection.execute("DELETE FROM sessions WHERE expires_at <= ? OR token_hash = ?", (now, old_token))

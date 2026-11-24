@@ -19,7 +19,7 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from accounts import (
-    COOKIE_NAME, SESSION_SECONDS, clean_text, cookie_token_hash, create_session,
+    AccountBanned, COOKIE_NAME, SESSION_SECONDS, clean_text, cookie_token_hash, create_session, ensure_active,
     session_account, user_fields, verify_max,
 )
 from device_logs import create_device_logger, log_camera_error, log_location_error
@@ -43,7 +43,7 @@ except ModuleNotFoundError as error:
 from database import ensure_key, migrate_plaintext, sqlite3
 from reports import (
     MAX_PHOTO_BYTES, ApiError, change_status, coordinates, create_draft, initialize_database,
-    list_reports, open_database, report_detail, report_photo, submit_report,
+    list_reports, open_database, report_detail, report_photo, set_author_ban, submit_report,
 )
 
 
@@ -52,6 +52,7 @@ CAPTURE_PATH = "/api/reports/capture"
 REVIEW_PATH = "/api/review"
 REPORT_ROUTE = re.compile(r"/api/(reports|review)/([1-9][0-9]{0,18})(?:/photos/(overview|detail))?")
 STATUS_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/status")
+BAN_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/author-ban")
 MAX_BODY_BYTES = 16 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
@@ -158,6 +159,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         current = session_account(connection, cookie_token_hash(self.headers.get("Cookie")), self.source)
         if current is None and required:
             raise ApiError(HTTPStatus.UNAUTHORIZED, "Войдите в приложение.")
+        if current is not None:
+            ensure_active(connection, current["id"])
         if reviewer and not self.is_reviewer(current):
             raise ApiError(HTTPStatus.FORBIDDEN, "Войдите в кабинет проверяющего.")
         return current
@@ -202,6 +205,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.get_api(path, connection)
         except ApiError as error:
             self.send_error(error.status, str(error))
+        except AccountBanned as error:
+            self.send_error(HTTPStatus.FORBIDDEN, str(error))
         except sqlite3.Error:
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
 
@@ -230,19 +235,22 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = self.path.partition("?")[0]
         status_route = STATUS_ROUTE.fullmatch(path)
+        ban_route = BAN_ROUTE.fullmatch(path)
         if path not in {
             "/api/session", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode",
             "/api/diagnostics/camera", "/api/diagnostics/location", REPORTS_PATH, CAPTURE_PATH,
-        } and status_route is None:
+        } and status_route is None and ban_route is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
             limit = MAX_CAPTURE_BODY_BYTES if path == CAPTURE_PATH else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
-                self.post_api(path, status_route, data, connection)
+                self.post_api(path, status_route, ban_route, data, connection)
         except ApiError as error:
             self.send_error(error.status, str(error))
+        except AccountBanned as error:
+            self.send_error(HTTPStatus.FORBIDDEN, str(error))
         except (UnicodeError, json.JSONDecodeError, RecursionError):
             self.send_error(HTTPStatus.BAD_REQUEST, "Некорректный JSON в кодировке UTF-8.")
         except ValueError as error:
@@ -250,7 +258,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         except sqlite3.Error:
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
 
-    def post_api(self, path, status_route, data, connection):
+    def post_api(self, path, status_route, ban_route, data, connection):
         token_hash = cookie_token_hash(self.headers.get("Cookie"))
         if path == "/api/session":
             if self.bot_token:
@@ -272,7 +280,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, self.session_data(None), self.session_cookie("", 0))
             return
 
-        account = self.account(connection, reviewer=status_route is not None)
+        account = self.account(connection, reviewer=status_route is not None or ban_route is not None)
         if path in self.device_logs:
             logger, record = self.device_logs[path]
             record(logger, data)
@@ -284,6 +292,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 (account["max_id"], data.get("first_name"), data.get("last_name")), test=self.source == "test",
             )
             with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                ensure_active(connection, account["id"])
                 connection.execute(
                     "UPDATE accounts SET first_name = ?, last_name = ? WHERE id = ?",
                     (*fields[1:], account["id"]),
@@ -297,6 +307,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                     and hmac.compare_digest(secret.encode(), self.reviewer_key.encode())):
                 raise ApiError(HTTPStatus.FORBIDDEN, "Неверный секрет проверяющего.")
             with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                ensure_active(connection, account["id"])
                 connection.execute(
                     "UPDATE sessions SET review_grant = ? WHERE token_hash = ?", (self.review_grant, token_hash),
                 )
@@ -312,12 +324,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"address": address})
             return
 
-        if status_route is not None:
-            identifier = int(status_route[1])
+        if status_route is not None or ban_route is not None:
+            identifier = int((status_route or ban_route)[1])
             if identifier > MAX_REPORT_ID:
                 raise ApiError(HTTPStatus.NOT_FOUND, "Обращение не найдено.")
             with connection:
-                report = change_status(connection, identifier, account, data)
+                report = (change_status(connection, identifier, account, data) if status_route
+                          else set_author_ban(connection, identifier, account, data))
             self.send_json(HTTPStatus.OK, report)
             return
 

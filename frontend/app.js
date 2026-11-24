@@ -22,6 +22,22 @@ let afterLogin = null;
 let panelVersion = 0;
 let bridge;
 
+function showSessionError(content, error, retry) {
+    content.replaceChildren(statusMessage(error.message), button("Повторить", retry));
+    if (error.status === 403) {
+        const message = statusMessage();
+        content.append(button("Выйти из аккаунта", async () => {
+            try {
+                setSession(await request("/api/logout", {}));
+                if (panel.open) panel.close();
+                retry();
+            } catch (logoutError) {
+                message.textContent = logoutError.message;
+            }
+        }), message);
+    }
+}
+
 export async function request(path, body) {
     let response;
     try {
@@ -119,10 +135,10 @@ export async function requireAccount(action) {
     } catch (error) {
         if (version !== panelVersion) return;
         const content = currentTab === "home" ? openModalPanel("Вход") : panelContent;
-        content.replaceChildren(statusMessage(error.message), button("Повторить", () => {
+        showSessionError(content, error, () => {
             if (panel.open) panel.close();
             requireAccount(action);
-        }));
+        });
         return;
     }
     if (!session.user) {
@@ -440,6 +456,7 @@ async function showDetails(identifier, reviewer = false, filter = "sent") {
             }
             panelContent.append(element("h3", "История статусов"), log);
         }
+        if (reviewer && report.author) showAuthorControls(report, path, version);
         if (reviewer && ["pending", "under_review"].includes(report.status)) {
             showReviewForm(report, path, version);
         }
@@ -447,6 +464,43 @@ async function showDetails(identifier, reviewer = false, filter = "sent") {
         message.textContent = error.message;
         if (activePanel(version)) panelContent.append(button("Повторить", () => showDetails(identifier, reviewer, filter)));
     }
+}
+
+function showAuthorControls(report, path, version) {
+    const author = report.author;
+    const card = element("section", "", "panel-stack capture-section");
+    card.append(
+        element("h3", "Автор обращения"),
+        element("p", `${author.first_name} ${author.last_name}`.trim()),
+        element("p", `ID MAX: ${author.max_id}`),
+        element("p", author.banned ? "Аккаунт заблокирован" : "Аккаунт активен"),
+    );
+    if (author.banned && author.ban_reason) {
+        card.append(element("p", `Причина: ${author.ban_reason}`, "report-comment"));
+    }
+    const form = element("form", "", "panel-stack");
+    const message = statusMessage();
+    if (!author.banned) {
+        form.append(field("Причина блокировки", "reason", { multiline: true, maxLength: 1000, required: true }));
+    }
+    const submit = submitButton(author.banned ? "Разблокировать аккаунт" : "Заблокировать аккаунт");
+    form.append(submit, message);
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        submit.disabled = true;
+        message.textContent = "Сохраняем…";
+        try {
+            const reason = author.banned ? "" : new FormData(form).get("reason");
+            await request(`${path}/author-ban`, { banned: !author.banned, reason });
+            if (activePanel(version)) showDetails(report.id, true);
+        } catch (error) {
+            message.textContent = error.message;
+        } finally {
+            submit.disabled = false;
+        }
+    });
+    card.append(form);
+    panelContent.append(card);
 }
 
 function showReviewForm(report, path, version) {
@@ -528,7 +582,7 @@ function renderTab(tab, identifier, filter = "sent") {
         request("/api/session").then((data) => {
             if (activePanel(version)) { setSession(data); showProfile(); }
         }).catch((error) => {
-            if (activePanel(version)) panelContent.replaceChildren(statusMessage(error.message), button("Повторить", () => renderTab("profile")));
+            if (activePanel(version)) showSessionError(panelContent, error, () => renderTab("profile"));
         });
         return;
     }
@@ -553,4 +607,5 @@ for (const tab of Object.keys(tabTitles)) {
 }
 window.addEventListener("popstate", () => renderTab(tabFromUrl()));
 $("open-about").addEventListener("click", showAbout);
+$("home-reports").addEventListener("click", () => navigate("history"));
 if (tabFromUrl() !== "home") renderTab(tabFromUrl());

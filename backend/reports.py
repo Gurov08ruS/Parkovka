@@ -5,7 +5,7 @@ from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 
-from accounts import clean_text
+from accounts import clean_text, ensure_active
 from database import open_database
 
 
@@ -100,6 +100,8 @@ def create_draft(connection, data, owner_id):
     if data.get("latitude") is not None or data.get("longitude") is not None:
         location = coordinates(data)
     comment = clean_text(data.get("comment", ""), "Комментарий", 1000)
+    connection.execute("BEGIN IMMEDIATE")
+    ensure_active(connection, owner_id)
     identifier = connection.execute(
         "INSERT INTO reports (owner_id, latitude, longitude, comment) VALUES (?, ?, ?, ?)",
         (owner_id, *location, comment),
@@ -128,6 +130,7 @@ def submit_report(connection, data, owner_id):
     detail = decode_photo(data["detail_photo"]) if data.get("detail_photo") is not None else None
 
     connection.execute("BEGIN IMMEDIATE")
+    ensure_active(connection, owner_id)
     previous = connection.execute(
         "SELECT report_id, owner_id FROM report_captures JOIN reports ON reports.id = report_id WHERE capture_id = ?",
         (capture_id,),
@@ -180,11 +183,46 @@ def visible_report(connection, identifier, account, reviewer):
 
 def report_detail(connection, identifier, account, reviewer):
     report = visible_report(connection, identifier, account, reviewer)
+    if reviewer:
+        author = connection.execute(
+            """SELECT accounts.id, accounts.max_id, accounts.first_name, accounts.last_name,
+                      COALESCE(account_bans.active, 0) AS banned,
+                      account_bans.reason AS ban_reason
+               FROM reports JOIN accounts ON accounts.id = reports.owner_id
+               LEFT JOIN account_bans ON account_bans.account_id = accounts.id
+               WHERE reports.id = ?""", (identifier,),
+        ).fetchone()
+        report["author"] = dict(author)
+        report["author"]["banned"] = bool(report["author"]["banned"])
     report["events"] = [dict(row) for row in connection.execute(
         "SELECT status, note, occurred_at FROM report_events WHERE report_id = ? ORDER BY id",
         (identifier,),
     )]
     return report
+
+
+def set_author_ban(connection, identifier, account, data):
+    banned = data.get("banned")
+    if type(banned) is not bool:
+        raise ValueError("Укажите действие с аккаунтом.")
+    reason = clean_text(data.get("reason", ""), "Причина блокировки", 1000, required=banned)
+    connection.execute("BEGIN IMMEDIATE")
+    ensure_active(connection, account["id"])
+    visible_report(connection, identifier, account, reviewer=True)
+    author_id = connection.execute("SELECT owner_id FROM reports WHERE id = ?", (identifier,)).fetchone()[0]
+    if author_id == account["id"]:
+        raise ApiError(HTTPStatus.CONFLICT, "Нельзя заблокировать собственный аккаунт.")
+    current = connection.execute("SELECT active FROM account_bans WHERE account_id = ?", (author_id,)).fetchone()
+    if bool(current and current["active"]) == banned:
+        return report_detail(connection, identifier, account, reviewer=True)
+    connection.execute(
+        """INSERT INTO account_bans (account_id, reviewer_id, active, reason)
+           VALUES (?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET
+           reviewer_id = excluded.reviewer_id, active = excluded.active, reason = excluded.reason,
+           changed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+        (author_id, account["id"], banned, reason),
+    )
+    return report_detail(connection, identifier, account, reviewer=True)
 
 
 def report_photo(connection, identifier, kind, account, reviewer):
@@ -202,6 +240,7 @@ def change_status(connection, identifier, account, data):
         raise ValueError("Выберите результат проверки.")
     note = clean_text(data.get("note", ""), "Результат проверки", 1000, required=status == "rejected")
     connection.execute("BEGIN IMMEDIATE")
+    ensure_active(connection, account["id"])
     current = visible_report(connection, identifier, account, reviewer=True)
     if status not in TRANSITIONS.get(current["status"], set()):
         raise ApiError(HTTPStatus.CONFLICT, "Статус уже изменился. Обновите очередь.")

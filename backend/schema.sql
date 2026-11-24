@@ -7,6 +7,14 @@ CREATE TABLE IF NOT EXISTS accounts (
     UNIQUE (source, max_id)
 );
 
+CREATE TABLE IF NOT EXISTS account_bans (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
+    reviewer_id INTEGER NOT NULL REFERENCES accounts(id),
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
+    reason TEXT NOT NULL,
+    changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
