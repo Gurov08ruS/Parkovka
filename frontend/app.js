@@ -16,6 +16,11 @@ let session = null;
 let afterLogin = null;
 let panelVersion = 0;
 let bridge;
+let editDraft;
+
+export function registerDraftEditor(editor) {
+    editDraft = editor;
+}
 
 function showSessionError(content, error, retry) {
     content.replaceChildren(statusMessage(error.message), button("Повторить", retry));
@@ -101,7 +106,7 @@ function openLogin(action) {
     accountSubmit.disabled = !test && !initData();
     accountMessage.textContent = "";
     afterLogin = action;
-    if (currentTab === "home") {
+    if (currentTab === "home" || $("report-dialog").open) {
         accountDialog.append(accountForm);
         if (!accountDialog.open) accountDialog.showModal();
     } else {
@@ -118,7 +123,7 @@ export async function requireAccount(action) {
         setSession(data);
     } catch (error) {
         if (version !== panelVersion) return;
-        const content = currentTab === "home" ? openModalPanel("Вход") : panelContent;
+        const content = currentTab === "home" || $("report-dialog").open ? openModalPanel("Вход") : panelContent;
         showSessionError(content, error, () => {
             if (panel.open) panel.close();
             requireAccount(action);
@@ -129,7 +134,7 @@ export async function requireAccount(action) {
         openLogin(action);
         return;
     }
-    action();
+    action(session.user);
 }
 
 accountForm.addEventListener("submit", async (event) => {
@@ -150,7 +155,7 @@ accountForm.addEventListener("submit", async (event) => {
         accountForm.reset();
         if (accountDialog.open) accountDialog.close();
         afterLogin = null;
-        action?.();
+        action?.(session.user);
     } catch (error) {
         if (version === panelVersion && action === afterLogin) accountMessage.textContent = error.message;
     } finally {
@@ -159,7 +164,7 @@ accountForm.addEventListener("submit", async (event) => {
     }
 });
 accountDialog.addEventListener("close", () => {
-    if (!accountDialog.open && currentTab === "home") afterLogin = null;
+    if (!accountDialog.open) afterLogin = null;
 });
 
 function openModalPanel(title) {
@@ -205,8 +210,12 @@ function showProfile() {
 
     if (!user) {
         panelContent.append(button("Войти в аккаунт", () => requireAccount(showProfile), true));
-        return;
     }
+    if (session?.review_enabled) {
+        const label = user?.reviewer ? "Кабинет проверяющего" : "Вход для проверяющего";
+        panelContent.append(panelLink(label, reviewPageUrl(), Boolean(user?.reviewer)));
+    }
+    if (!user) return;
     const stats = element("section", "", "panel-stack capture-section");
     const statsMessage = statusMessage("Загружаем статистику…");
     stats.append(element("h3", "Мои обращения"), statsMessage);
@@ -216,9 +225,6 @@ function showProfile() {
     }).catch((error) => {
         if (activePanel(version)) statsMessage.textContent = error.message;
     });
-    if (user.reviewer) {
-        panelContent.append(panelLink("Кабинет проверяющего", reviewPageUrl(), true));
-    }
     const logoutMessage = statusMessage();
     const logout = button("Выйти из аккаунта", async () => {
         logout.disabled = true;
@@ -278,7 +284,7 @@ async function showList(filter = "sent") {
     const version = openPanel("Мои обращения");
     const filters = element("div", "", "report-filter");
     for (const [name, label] of [["sent", "Отправленные"], ["drafts", "Черновики"]]) {
-        const control = button(label, () => showList(name), filter === name);
+        const control = button(label, () => navigate("history", undefined, name), filter === name);
         control.setAttribute("aria-pressed", String(filter === name));
         filters.append(control);
     }
@@ -309,8 +315,8 @@ async function showList(filter = "sent") {
     }
 }
 
-export function showHistory(identifier) {
-    navigate("history", identifier);
+export function showHistory(identifier, filter) {
+    navigate("history", identifier, filter);
 }
 
 async function showDetails(identifier, filter = "sent") {
@@ -323,6 +329,9 @@ async function showDetails(identifier, filter = "sent") {
         if (!activePanel(version)) return;
         message.remove();
         appendReportDetails(panelContent, report, path);
+        if (report.capture_id && editDraft) {
+            panelContent.append(button("Продолжить черновик", () => editDraft(report), true));
+        }
     } catch (error) {
         if (!activePanel(version)) return;
         message.textContent = error.message;
@@ -397,28 +406,31 @@ function renderTab(tab, identifier, filter = "sent") {
     });
 }
 
-function tabUrl(tab) {
+function tabUrl(tab, filter) {
     const url = new URL(location.href);
     if (tab === "home") url.searchParams.delete("tab");
     else url.searchParams.set("tab", tab);
+    if (tab === "history" && filter === "drafts") url.searchParams.set("filter", "drafts");
+    else url.searchParams.delete("filter");
     url.searchParams.delete("review");
     return url;
 }
 
 function navigate(tab, identifier, filter) {
-    const url = tabUrl(tab);
+    const url = tabUrl(tab, filter);
     if (url.href !== location.href) history.pushState(null, "", url);
     renderTab(tab, identifier, filter);
 }
 
 function renderLocation() {
     const tab = tabFromUrl();
-    const review = new URL(location.href).searchParams.get("review");
+    const params = new URL(location.href).searchParams;
+    const review = params.get("review");
     if (tab === "profile" && (review === "queue" || /^[1-9][0-9]{0,18}$/.test(review))) {
         location.replace(reviewPageUrl(review === "queue" ? undefined : review));
         return;
     }
-    renderTab(tab);
+    renderTab(tab, undefined, params.get("filter") === "drafts" ? "drafts" : "sent");
 }
 
 for (const tab of Object.keys(tabTitles)) {

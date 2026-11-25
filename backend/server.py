@@ -24,6 +24,7 @@ from accounts import (
     session_account, user_fields, verify_max,
 )
 from device_logs import create_device_logger, log_camera_error, log_location_error
+from max_bot import WEBHOOK_PATH, MaxApiError, MaxBot, webhook_url
 
 try:
     import sqlcipher3
@@ -44,17 +45,19 @@ from database import DatabaseKeyError, database_has_data, migrate_plaintext, sql
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
-    reviewer_decision_stats, set_author_ban, submit_report,
+    reviewer_decision_stats, save_capture, set_author_ban,
 )
 
 
 REPORTS_PATH = "/api/reports"
 CAPTURE_PATH = "/api/reports/capture"
+DRAFT_CAPTURE_PATH = f"{CAPTURE_PATH}/draft"
 REVIEW_PATH = "/api/review"
 REPORT_ROUTE = re.compile(r"/api/(reports|review)/([1-9][0-9]{0,18})(?:/photos/(overview|detail))?")
 STATUS_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/status")
 BAN_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/author-ban")
 MAX_BODY_BYTES = 16 * 1024
+MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
 PHOTON_URL = os.environ.get("STUKACH_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
@@ -130,10 +133,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         ".webp": "image/webp",
     }
 
-    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, device_logs, **kwargs):
+    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, device_logs, max_bot=None, **kwargs):
         self.database = database
         self.device_logs = device_logs
         self.bot_token = bot_token
+        self.max_bot = max_bot
         self.reviewer_key = reviewer_key
         self.review_grant = hashlib.sha256(reviewer_key.encode()).hexdigest() if reviewer_key else None
         self.secure_cookie = secure_cookie
@@ -281,13 +285,16 @@ class AppHandler(SimpleHTTPRequestHandler):
         status_route = STATUS_ROUTE.fullmatch(path)
         ban_route = BAN_ROUTE.fullmatch(path)
         if path not in {
-            "/api/session", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode",
-            "/api/diagnostics/camera", "/api/diagnostics/location", REPORTS_PATH, CAPTURE_PATH,
+            "/api/session", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
+            "/api/diagnostics/camera", "/api/diagnostics/location", REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH,
         } and status_route is None and ban_route is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
-            limit = MAX_CAPTURE_BODY_BYTES if path == CAPTURE_PATH else MAX_BODY_BYTES
+            if path == WEBHOOK_PATH:
+                self.receive_max_update()
+                return
+            limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH) else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
                 self.post_api(path, status_route, ban_route, data, connection)
@@ -295,12 +302,23 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_error(error.status, str(error))
         except AccountBanned as error:
             self.send_error(HTTPStatus.FORBIDDEN, str(error))
+        except MaxApiError as error:
+            self.log_error("Ошибка ответа бота MAX: %s", error)
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Не удалось обработать событие MAX.")
         except (UnicodeError, json.JSONDecodeError, RecursionError):
             self.send_error(HTTPStatus.BAD_REQUEST, "Некорректный JSON в кодировке UTF-8.")
         except (DatabaseKeyError, sqlite3.Error):
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
         except ValueError as error:
             self.send_error(HTTPStatus.BAD_REQUEST, str(error))
+
+    def receive_max_update(self):
+        if self.max_bot is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "Страница не найдена.")
+        if not self.max_bot.authenticates(self.headers.get("X-Max-Bot-Api-Secret")):
+            raise ApiError(HTTPStatus.FORBIDDEN, "Неверный секрет вебхука MAX.")
+        self.max_bot.handle_update(self.read_json(MAX_WEBHOOK_BODY_BYTES))
+        self.send_json(HTTPStatus.OK, {"ok": True})
 
     def post_api(self, path, status_route, ban_route, data, connection):
         token_hash = cookie_token_hash(self.headers.get("Cookie"))
@@ -380,8 +398,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         with connection:
-            if path == CAPTURE_PATH:
-                report, created = submit_report(connection, data, account["id"])
+            if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH):
+                if data.get("owner_max_id", account["max_id"]) != account["max_id"]:
+                    raise ApiError(HTTPStatus.CONFLICT, "Войдите в аккаунт, в котором сделали снимок.")
+                report, created = save_capture(connection, data, account["id"], draft=path == DRAFT_CAPTURE_PATH)
             else:
                 report, created = create_draft(connection, data, account["id"]), True
         self.send_json(
@@ -399,16 +419,34 @@ def main():
     parser.add_argument("--migrate-from", type=Path, help="Скопировать SQLite в новую зашифрованную базу")
     parser.add_argument("--cert", type=Path, help="Сертификат HTTPS в формате PEM")
     parser.add_argument("--key", type=Path, help="Ключ сертификата HTTPS")
+    parser.add_argument("--bot", action="store_true", help="Включить обработку событий бота MAX")
+    parser.add_argument("--register-max-webhook", action="store_true", help="Подключить вебхук MAX и завершить работу")
     options = parser.parse_args()
     if (options.cert is None) != (options.key is None):
         parser.error("Параметры --cert и --key нужно указывать вместе.")
+
+    bot_token = os.environ.get("STUKACH_MAX_BOT_TOKEN")
+    if options.register_max_webhook:
+        public_url = os.environ.get("STUKACH_MAX_PUBLIC_URL")
+        if not bot_token or not public_url:
+            parser.error("Для регистрации задайте STUKACH_MAX_BOT_TOKEN и STUKACH_MAX_PUBLIC_URL.")
+        try:
+            url = webhook_url(public_url)
+            MaxBot(bot_token).register(url)
+        except (ValueError, MaxApiError) as error:
+            raise SystemExit(f"Не удалось подключить вебхук MAX: {error}") from None
+        print(f"Вебхук MAX подключён: {url}", flush=True)
+        return
+
+    if options.bot and not bot_token:
+        parser.error("Для запуска с --bot задайте STUKACH_MAX_BOT_TOKEN.")
+    max_bot = MaxBot(bot_token) if options.bot else None
 
     tls = None
     if options.cert is not None:
         tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls.load_cert_chain(options.cert, options.key)
 
-    bot_token = os.environ.get("STUKACH_MAX_BOT_TOKEN")
     reviewer_key = os.environ.get("STUKACH_REVIEW_KEY")
     generated_key = None
     if not bot_token and not reviewer_key:
@@ -426,7 +464,7 @@ def main():
     except (OSError, ValueError, sqlite3.Error) as error:
         raise SystemExit(f"Не удалось открыть базу {options.db}: {error}") from None
     handler = partial(
-        AppHandler, database=options.db, bot_token=bot_token, reviewer_key=reviewer_key,
+        AppHandler, database=options.db, bot_token=bot_token, reviewer_key=reviewer_key, max_bot=max_bot,
         secure_cookie=tls is not None or bool(bot_token),
         device_logs={
             "/api/diagnostics/camera": (create_device_logger(options.db.with_suffix(".camera.log")), log_camera_error),
@@ -452,6 +490,8 @@ def main():
         scheme = "https" if tls is not None else "http"
         browser_host = "127.0.0.1" if options.host in ("", "0.0.0.0") else options.host
         print(f"Сайт и API: {scheme}://{browser_host}:{server.server_port}/", flush=True)
+        if max_bot is not None:
+            print(f"Бот MAX включён: {WEBHOOK_PATH}", flush=True)
         if generated_key:
             print(f"Тестовый секрет проверяющего: {generated_key}", flush=True)
         try:
