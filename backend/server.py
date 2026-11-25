@@ -44,12 +44,13 @@ from database import DatabaseKeyError, database_has_data, migrate_plaintext, sql
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
-    reviewer_decision_stats, set_author_ban, submit_report,
+    reviewer_decision_stats, save_capture, set_author_ban,
 )
 
 
 REPORTS_PATH = "/api/reports"
 CAPTURE_PATH = "/api/reports/capture"
+DRAFT_CAPTURE_PATH = f"{CAPTURE_PATH}/draft"
 REVIEW_PATH = "/api/review"
 REPORT_ROUTE = re.compile(r"/api/(reports|review)/([1-9][0-9]{0,18})(?:/photos/(overview|detail))?")
 STATUS_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/status")
@@ -282,12 +283,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         ban_route = BAN_ROUTE.fullmatch(path)
         if path not in {
             "/api/session", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode",
-            "/api/diagnostics/camera", "/api/diagnostics/location", REPORTS_PATH, CAPTURE_PATH,
+            "/api/diagnostics/camera", "/api/diagnostics/location", REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH,
         } and status_route is None and ban_route is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
-            limit = MAX_CAPTURE_BODY_BYTES if path == CAPTURE_PATH else MAX_BODY_BYTES
+            limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH) else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
                 self.post_api(path, status_route, ban_route, data, connection)
@@ -380,8 +381,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         with connection:
-            if path == CAPTURE_PATH:
-                report, created = submit_report(connection, data, account["id"])
+            if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH):
+                if data.get("owner_max_id", account["max_id"]) != account["max_id"]:
+                    raise ApiError(HTTPStatus.CONFLICT, "Войдите в аккаунт, в котором сделали снимок.")
+                report, created = save_capture(connection, data, account["id"], draft=path == DRAFT_CAPTURE_PATH)
             else:
                 report, created = create_draft(connection, data, account["id"]), True
         self.send_json(

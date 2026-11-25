@@ -1,4 +1,4 @@
-import { requestMaxCameraAccess, requireAccount, showHistory } from "./app.js";
+import { registerDraftEditor, requestMaxCameraAccess, requireAccount, showHistory } from "./app.js";
 import { request } from "./ui.js";
 
 const dialog = document.querySelector("#report-dialog");
@@ -19,6 +19,7 @@ const closeButton = document.querySelector("#close-report");
 const locationStatus = document.querySelector("#location-status");
 const cameraStatus = document.querySelector("#camera-status");
 const saveStatus = document.querySelector("#save-status");
+const draftStatus = document.querySelector("#draft-status");
 const cameraView = document.querySelector("#camera-view");
 const video = document.querySelector("#camera-preview");
 const preview = document.querySelector("#photo-preview");
@@ -62,7 +63,12 @@ let detailPhoto = null;
 let capturedAt = null;
 let photoKind = "overview";
 let captureId = null;
+let captureOwner = null;
 let submittedId = null;
+let draftRevision = 0;
+let savedRevision = 0;
+let draftTimer;
+let draftSave = null;
 let stream = null;
 let preferredCamera = defaultCamera;
 let lastCamera = null;
@@ -145,10 +151,14 @@ function stopCamera() {
     updateButtons();
 }
 
-function clearDraft() {
+function resetReport() {
     session += 1;
     step = 1;
-    position = address = photo = detailPhoto = capturedAt = captureId = submittedId = null;
+    position = address = photo = detailPhoto = capturedAt = captureId = captureOwner = submittedId = null;
+    draftRevision = savedRevision = 0;
+    draftSave = null;
+    clearTimeout(draftTimer);
+    window.removeEventListener("beforeunload", protectDraft);
     locating = openingCamera = saving = false;
     lastCamera = null;
     stopCamera();
@@ -162,6 +172,7 @@ function clearDraft() {
     locationStatus.textContent = locationPrompt;
     cameraStatus.textContent = photoPrompt;
     saveStatus.textContent = "";
+    draftStatus.textContent = "";
     showStep(1);
 }
 
@@ -227,21 +238,23 @@ async function locate() {
             locationStatus.textContent = "Точная позиция недоступна. Пробуем обычный режим…";
             result = await getPosition(false);
         }
-        if (current !== session) return;
+        if (current !== session || saving) return;
         const { coords } = result;
         if (!Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90
             || !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180) {
             throw { code: "invalid_coordinates" };
         }
         position = { latitude: coords.latitude, longitude: coords.longitude };
-        address = captureId = null;
+        address = null;
+        scheduleDraft();
         const accuracy = Number.isFinite(coords.accuracy) ? ` (точность ±${Math.round(coords.accuracy)} м)` : "";
         const display = `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}${accuracy}`;
         locationStatus.textContent = `${display}. Ищем адрес…`;
         try {
             const result = await request("/api/geocode", position);
-            if (current !== session) return;
+            if (current !== session || saving) return;
             address = result.address;
+            if (address) scheduleDraft();
         } catch {
             if (current !== session) return;
             deviceFailure("location", "address", "lookup_failed");
@@ -314,9 +327,9 @@ async function openCamera(kind) {
 }
 
 async function showCamera(activeStream, current) {
-    if (current !== session || document.hidden) {
+    if (current !== session || document.hidden || saving) {
         activeStream.getTracks().forEach((track) => track.stop());
-        if (current === session) {
+        if (current === session && !saving) {
             cameraFailure("stream", "document_hidden", "Вернитесь во вкладку приложения и откройте камеру ещё раз.");
         }
         return;
@@ -519,7 +532,7 @@ function takePhoto() {
         cameraFailure("capture", "photo_too_large", "Снимок слишком большой. Попробуйте ещё раз.");
         return;
     }
-    captureId = null;
+    captureId ??= crypto.randomUUID();
     if (photoKind === "overview") {
         photo = encoded;
         capturedAt = new Date().toISOString();
@@ -533,23 +546,156 @@ function takePhoto() {
     cameraStatus.textContent = "Проверьте, что знак и госномер хорошо видны на снимках.";
     lastCamera = null;
     stopCamera();
+    scheduleDraft();
     photoPreviews.scrollIntoView({ block: "nearest" });
+}
+
+function capturePayload() {
+    return {
+        ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
+        comment: comment.value, plate_number: plateNumber.value, capture_id: captureId, owner_max_id: captureOwner,
+    };
+}
+
+function protectDraft(event) {
+    event.preventDefault();
+    event.returnValue = "";
+}
+
+function flushDraft() {
+    clearTimeout(draftTimer);
+    if (draftSave) return draftSave;
+    if (!photo || submittedId !== null || savedRevision === draftRevision) return Promise.resolve();
+    const current = session;
+    draftStatus.textContent = "Сохраняем черновик…";
+    draftSave = (async () => {
+        while (savedRevision !== draftRevision) {
+            const revision = draftRevision;
+            const result = await request("/api/reports/capture/draft", capturePayload());
+            if (current !== session) return;
+            savedRevision = revision;
+            if (result.submitted_at) {
+                submittedId = result.id;
+                saveStatus.textContent = `Обращение №${result.id} уже отправлено.`;
+                updateButtons();
+                break;
+            }
+        }
+        window.removeEventListener("beforeunload", protectDraft);
+        draftStatus.textContent = submittedId === null ? "Черновик сохранён." : "Обращение уже отправлено.";
+    })().finally(() => {
+        if (current === session) draftSave = null;
+    });
+    return draftSave;
+}
+
+async function autosaveDraft() {
+    const current = session;
+    try {
+        await flushDraft();
+    } catch (error) {
+        if (current === session) draftStatus.textContent = `Не удалось сохранить черновик. ${error.message}`;
+    }
+}
+
+function scheduleDraft(delay = 0) {
+    if (!photo || submittedId !== null) return;
+    draftRevision += 1;
+    window.addEventListener("beforeunload", protectDraft);
+    clearTimeout(draftTimer);
+    if (delay) draftTimer = setTimeout(autosaveDraft, delay);
+    else void autosaveDraft();
+}
+
+async function closeReport() {
+    if (saving) return;
+    if (!photo || submittedId !== null) {
+        dialog.close();
+        return;
+    }
+    saving = true;
+    stopCamera();
+    try {
+        await flushDraft();
+        const identifier = submittedId;
+        dialog.close();
+        showHistory(identifier, identifier === null ? "drafts" : "sent");
+    } catch (error) {
+        draftStatus.textContent = `Не удалось сохранить черновик. ${error.message}`;
+        if (error.status === 401) void requireAccount(closeReport);
+    } finally {
+        saving = false;
+        updateButtons();
+    }
+}
+
+async function readDraftPhoto(identifier, kind) {
+    const response = await fetch(`/api/reports/${identifier}/photos/${kind}`);
+    if (!response.ok) throw new Error("Не удалось загрузить фото из черновика. Откройте его ещё раз.");
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Не удалось прочитать фото из черновика."));
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function openDraft(report, user) {
+    if (dialog.open) return;
+    resetReport();
+    dialog.showModal();
+    saving = true;
+    updateButtons();
+    draftStatus.textContent = "Открываем черновик…";
+    try {
+        const [main, detail] = await Promise.all([
+            readDraftPhoto(report.id, "overview"),
+            report.has_detail_photo ? readDraftPhoto(report.id, "detail") : null,
+        ]);
+        captureId = report.capture_id;
+        captureOwner = user.max_id;
+        capturedAt = report.captured_at;
+        photo = main.split(",", 2)[1];
+        preview.src = main;
+        cameraButton.textContent = "Переснять основное фото";
+        if (detail) {
+            detailPhoto = detail.split(",", 2)[1];
+            detailPreview.src = detail;
+            detailButton.textContent = "Переснять второе фото";
+        }
+        if (report.latitude !== null) {
+            position = { latitude: report.latitude, longitude: report.longitude };
+            address = report.address;
+            locationStatus.textContent = address || `${report.latitude.toFixed(5)}, ${report.longitude.toFixed(5)}`;
+            locateButton.textContent = "Определить заново";
+        }
+        comment.value = report.comment;
+        plateNumber.value = report.plate_number || "";
+        showStep(3);
+        draftStatus.textContent = "Черновик сохранён.";
+    } catch (error) {
+        draftStatus.textContent = error.message;
+    } finally {
+        saving = false;
+        updateButtons();
+    }
 }
 
 async function saveReport(event) {
     event.preventDefault();
     if (saveButton.disabled) return;
 
-    captureId ??= crypto.randomUUID();
+    clearTimeout(draftTimer);
     saving = true;
     updateButtons();
     saveStatus.textContent = "Отправляем обращение…";
     try {
-        const result = await request("/api/reports/capture", {
-            ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
-            comment: comment.value, plate_number: plateNumber.value, capture_id: captureId,
-        });
+        await draftSave?.catch(() => {});
+        const result = await request("/api/reports/capture", capturePayload());
         submittedId = result.id;
+        window.removeEventListener("beforeunload", protectDraft);
+        draftStatus.textContent = "";
         saveStatus.textContent = `Обращение №${result.id} принято на внутреннюю проверку.`;
     } catch (error) {
         saveStatus.textContent = error.message;
@@ -565,17 +711,22 @@ async function saveReport(event) {
 }
 
 document.querySelector("#open-report").addEventListener("click", () => {
-    requireAccount(() => {
+    requireAccount((user) => {
         if (dialog.open) return;
-        clearDraft();
+        resetReport();
+        captureOwner = user.max_id;
         dialog.showModal();
     });
 });
-closeButton.addEventListener("click", () => dialog.close());
+registerDraftEditor((report) => requireAccount((user) => openDraft(report, user)));
+closeButton.addEventListener("click", closeReport);
 dialog.addEventListener("cancel", (event) => {
-    if (saving) event.preventDefault();
+    event.preventDefault();
+    void closeReport();
 });
-dialog.addEventListener("close", clearDraft);
+dialog.addEventListener("close", () => {
+    if (!dialog.open) resetReport();
+});
 for (const eventName of ["dragover", "drop"]) {
     dialog.addEventListener(eventName, (event) => event.preventDefault());
 }
@@ -587,13 +738,14 @@ skipDetail.addEventListener("click", () => showStep(3));
 previousStep.addEventListener("click", () => showStep(1));
 document.querySelector("#back-to-photos").addEventListener("click", () => showStep(2));
 removeDetail.addEventListener("click", () => {
-    detailPhoto = captureId = null;
+    detailPhoto = null;
     detailPreview.removeAttribute("src");
     detailButton.textContent = "Сделать второе фото";
     stopCamera();
+    scheduleDraft();
 });
-comment.addEventListener("input", () => { captureId = null; });
-plateNumber.addEventListener("input", () => { captureId = null; });
+comment.addEventListener("input", () => scheduleDraft(650));
+plateNumber.addEventListener("input", () => scheduleDraft(650));
 showSubmitted.addEventListener("click", () => {
     const identifier = submittedId;
     dialog.close();
@@ -618,9 +770,13 @@ cancelCameraButton.addEventListener("click", () => {
 });
 form.addEventListener("submit", saveReport);
 document.addEventListener("visibilitychange", () => {
+    if (document.hidden && dialog.open && !saving) void autosaveDraft();
     if (document.hidden && stream) {
         stopCamera();
         cameraFailure("stream", "document_hidden", "Камера остановлена, пока вкладка была скрыта. Откройте её ещё раз.");
     }
+});
+window.addEventListener("online", () => {
+    if (dialog.open && !saving) void autosaveDraft();
 });
 window.addEventListener("pagehide", stopCamera);

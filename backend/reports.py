@@ -118,32 +118,34 @@ def report_json(row):
     return report
 
 
-def create_draft(connection, data, owner_id):
-    location = (None, None)
-    if data.get("latitude") is not None or data.get("longitude") is not None:
-        location = coordinates(data)
+def report_fields(data, *, draft):
+    has_position = data.get("latitude") is not None or data.get("longitude") is not None
+    location = coordinates(data) if has_position or not draft else (None, None)
     comment = clean_text(data.get("comment", ""), "Комментарий", 1000)
     plate = clean_text(data.get("plate_number", ""), "Госномер", 32).upper() or None
+    return (*location, comment, plate, "manual" if plate else None, "unverified" if plate else None)
+
+
+def create_draft(connection, data, owner_id):
+    fields = report_fields(data, draft=True)
     connection.execute("BEGIN IMMEDIATE")
     ensure_active(connection, owner_id)
     identifier = connection.execute(
         """INSERT INTO reports (owner_id, latitude, longitude, comment, plate_number, plate_source, plate_verification)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (owner_id, *location, comment, plate, "manual" if plate else None, "unverified" if plate else None),
+        (owner_id, *fields),
     ).lastrowid
     return report_json(connection.execute(REPORT_QUERY + " WHERE reports.id = ?", (identifier,)).fetchone())
 
 
-def submit_report(connection, data, owner_id):
-    latitude, longitude = coordinates(data)
+def save_capture(connection, data, owner_id, *, draft=False):
+    fields = report_fields(data, draft=draft)
     capture_id = data.get("capture_id")
     if not isinstance(capture_id, str) or not CAPTURE_ID.fullmatch(capture_id):
         raise ValueError("Некорректный идентификатор отправки.")
     address = data.get("address")
     if address is not None:
         address = clean_text(address, "Адрес", 1000) or None
-    comment = clean_text(data.get("comment", ""), "Комментарий", 1000)
-    plate = clean_text(data.get("plate_number", ""), "Госномер", 32).upper() or None
     captured_at = data.get("captured_at")
     if captured_at is not None:
         if not isinstance(captured_at, str) or not CAPTURE_TIME.fullmatch(captured_at):
@@ -158,32 +160,43 @@ def submit_report(connection, data, owner_id):
     connection.execute("BEGIN IMMEDIATE")
     ensure_active(connection, owner_id)
     previous = connection.execute(
-        "SELECT report_id, owner_id FROM report_captures JOIN reports ON reports.id = report_id WHERE capture_id = ?",
+        """SELECT report_id, owner_id, status, submitted_at
+           FROM report_captures JOIN reports ON reports.id = report_id WHERE capture_id = ?""",
         (capture_id,),
     ).fetchone()
-    if previous is not None:
+    if previous is None:
+        identifier = connection.execute("INSERT INTO reports (owner_id) VALUES (?)", (owner_id,)).lastrowid
+    else:
         if previous["owner_id"] != owner_id:
             raise ApiError(HTTPStatus.CONFLICT, "Создайте новое обращение и повторите отправку.")
-        return report_json(connection.execute(
-            REPORT_QUERY + " WHERE reports.id = ?", (previous["report_id"],),
-        ).fetchone()), False
+        identifier = previous["report_id"]
+        if previous["submitted_at"] is not None:
+            return visible_report(connection, identifier, {"id": owner_id}, False), False
+        if previous["status"] != "draft":
+            raise ApiError(HTTPStatus.CONFLICT, "Этот черновик уже закрыт.")
 
-    identifier = connection.execute(
-        """INSERT INTO reports (owner_id, status, latitude, longitude, comment,
-                                plate_number, plate_source, plate_verification, submitted_at)
-           VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))""",
-        (owner_id, latitude, longitude, comment, plate, "manual" if plate else None, "unverified" if plate else None),
-    ).lastrowid
+    connection.execute(
+        """UPDATE reports SET latitude = ?, longitude = ?, comment = ?,
+                              plate_number = ?, plate_source = ?, plate_verification = ? WHERE id = ?""",
+        (*fields, identifier),
+    )
     connection.execute(
         """INSERT INTO report_captures (report_id, capture_id, address, photo, detail_photo, captured_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(report_id) DO UPDATE SET
+               address = excluded.address, photo = excluded.photo,
+               detail_photo = excluded.detail_photo, captured_at = excluded.captured_at""",
         (identifier, capture_id, address, photo, detail, captured_at),
     )
-    connection.execute(
-        "INSERT INTO report_events (report_id, actor_id, status) VALUES (?, ?, 'pending')",
-        (identifier, owner_id),
-    )
-    return report_json(connection.execute(REPORT_QUERY + " WHERE reports.id = ?", (identifier,)).fetchone()), True
+    if not draft:
+        connection.execute(
+            "UPDATE reports SET status = 'pending', submitted_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+            (identifier,),
+        )
+        connection.execute(
+            "INSERT INTO report_events (report_id, actor_id, status) VALUES (?, ?, 'pending')",
+            (identifier, owner_id),
+        )
+    return visible_report(connection, identifier, {"id": owner_id}, False), previous is None
 
 
 def report_scope(account, reviewer):
@@ -229,6 +242,10 @@ def visible_report(connection, identifier, account, reviewer):
 
 def report_detail(connection, identifier, account, reviewer):
     report = visible_report(connection, identifier, account, reviewer)
+    if not reviewer and report["status"] == "draft" and report["has_photo"]:
+        row = connection.execute("SELECT capture_id FROM report_captures WHERE report_id = ?", (identifier,)).fetchone()
+        if row is not None:
+            report["capture_id"] = row["capture_id"]
     if reviewer:
         author = connection.execute(
             """SELECT accounts.id, accounts.max_id, accounts.first_name, accounts.last_name,
