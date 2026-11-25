@@ -450,6 +450,18 @@ window.addEventListener("popstate", renderLocation);
 $("open-about").addEventListener("click", showAbout);
 $("home-reports").addEventListener("click", () => navigate("history"));
 $("header-profile")?.addEventListener("click", () => navigate("profile"));
+const parkingWarning = $("parking-warning");
+let warningClickAnimation;
+parkingWarning.addEventListener("click", () => {
+    warningClickAnimation?.cancel();
+    if (!window.matchMedia("(prefers-reduced-motion: no-preference)").matches) return;
+    warningClickAnimation = parkingWarning.firstElementChild.animate?.([
+        { transform: "scale(1)" },
+        { transform: "scale(.92)", offset: .24 },
+        { transform: "scale(1.08)", offset: .6 },
+        { transform: "scale(1)" },
+    ], { duration: 360, easing: "ease-in-out" });
+});
 loadSession().then((data) => {
     if (session === null) setSession(data);
 }).catch(() => {});
