@@ -193,6 +193,24 @@ def report_scope(account, reviewer):
     return "reports.owner_id = ?", account["id"]
 
 
+def account_report_stats(connection, account_id):
+    return dict(connection.execute(
+        """SELECT COUNT(*) FILTER (WHERE status = 'approved') AS approved,
+                  COUNT(*) FILTER (WHERE status = 'rejected') AS rejected
+           FROM reports WHERE owner_id = ? AND status IN ('approved', 'rejected')""",
+        (account_id,),
+    ).fetchone())
+
+
+def reviewer_decision_stats(connection, account_id):
+    return dict(connection.execute(
+        """SELECT COUNT(*) FILTER (WHERE status = 'approved') AS approved,
+                  COUNT(*) FILTER (WHERE status = 'rejected') AS rejected
+           FROM report_events WHERE actor_id = ? AND account_ban = 0 AND status IN ('approved', 'rejected')""",
+        (account_id,),
+    ).fetchone())
+
+
 def list_reports(connection, account, reviewer=False):
     scope, value = report_scope(account, reviewer)
     order = "CASE reports.status WHEN 'pending' THEN 0 WHEN 'under_review' THEN 1 ELSE 2 END, " if reviewer else ""
@@ -221,6 +239,7 @@ def report_detail(connection, identifier, account, reviewer):
         ).fetchone()
         report["author"] = dict(author)
         report["author"]["banned"] = bool(report["author"]["banned"])
+        report["author"]["stats"] = account_report_stats(connection, author["id"])
     report["events"] = [dict(row) for row in connection.execute(
         "SELECT status, note, occurred_at FROM report_events WHERE report_id = ? ORDER BY id",
         (identifier,),

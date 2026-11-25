@@ -59,3 +59,4 @@ CREATE TABLE IF NOT EXISTS report_events (
 );
 
 CREATE INDEX IF NOT EXISTS report_events_report ON report_events(report_id, id);
+CREATE INDEX IF NOT EXISTS report_events_actor_status ON report_events(actor_id, status);

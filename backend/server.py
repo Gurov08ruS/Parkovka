@@ -42,8 +42,9 @@ except ModuleNotFoundError as error:
 
 from database import ensure_key, migrate_plaintext, sqlite3
 from reports import (
-    MAX_PHOTO_BYTES, ApiError, change_status, coordinates, create_draft, initialize_database,
-    list_reports, open_database, report_detail, report_photo, set_author_ban, submit_report,
+    MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft,
+    initialize_database, list_reports, open_database, report_detail, report_photo,
+    reviewer_decision_stats, set_author_ban, submit_report,
 )
 
 
@@ -223,6 +224,14 @@ class AppHandler(SimpleHTTPRequestHandler):
     def get_api(self, path, connection):
         if path == "/api/session":
             self.send_json(HTTPStatus.OK, self.session_data(self.account(connection, required=False)))
+            return
+        if path == f"{REPORTS_PATH}/stats":
+            account = self.account(connection)
+            self.send_json(HTTPStatus.OK, account_report_stats(connection, account["id"]))
+            return
+        if path == f"{REVIEW_PATH}/stats":
+            account = self.account(connection, reviewer=True)
+            self.send_json(HTTPStatus.OK, reviewer_decision_stats(connection, account["id"]))
             return
         if path in (REPORTS_PATH, REVIEW_PATH):
             reviewer = path == REVIEW_PATH
