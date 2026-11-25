@@ -419,24 +419,28 @@ def main():
     parser.add_argument("--migrate-from", type=Path, help="Скопировать SQLite в новую зашифрованную базу")
     parser.add_argument("--cert", type=Path, help="Сертификат HTTPS в формате PEM")
     parser.add_argument("--key", type=Path, help="Ключ сертификата HTTPS")
+    parser.add_argument("--bot", action="store_true", help="Включить обработку событий бота MAX")
     parser.add_argument("--register-max-webhook", action="store_true", help="Подключить вебхук MAX и завершить работу")
     options = parser.parse_args()
     if (options.cert is None) != (options.key is None):
         parser.error("Параметры --cert и --key нужно указывать вместе.")
 
     bot_token = os.environ.get("STUKACH_MAX_BOT_TOKEN")
-    max_bot = MaxBot(bot_token) if bot_token else None
     if options.register_max_webhook:
         public_url = os.environ.get("STUKACH_MAX_PUBLIC_URL")
-        if not max_bot or not public_url:
+        if not bot_token or not public_url:
             parser.error("Для регистрации задайте STUKACH_MAX_BOT_TOKEN и STUKACH_MAX_PUBLIC_URL.")
         try:
             url = webhook_url(public_url)
-            max_bot.register(url)
+            MaxBot(bot_token).register(url)
         except (ValueError, MaxApiError) as error:
             raise SystemExit(f"Не удалось подключить вебхук MAX: {error}") from None
         print(f"Вебхук MAX подключён: {url}", flush=True)
         return
+
+    if options.bot and not bot_token:
+        parser.error("Для запуска с --bot задайте STUKACH_MAX_BOT_TOKEN.")
+    max_bot = MaxBot(bot_token) if options.bot else None
 
     tls = None
     if options.cert is not None:
@@ -486,6 +490,8 @@ def main():
         scheme = "https" if tls is not None else "http"
         browser_host = "127.0.0.1" if options.host in ("", "0.0.0.0") else options.host
         print(f"Сайт и API: {scheme}://{browser_host}:{server.server_port}/", flush=True)
+        if max_bot is not None:
+            print(f"Бот MAX включён: {WEBHOOK_PATH}", flush=True)
         if generated_key:
             print(f"Тестовый секрет проверяющего: {generated_key}", flush=True)
         try:
