@@ -448,21 +448,26 @@ def main():
         parser.error("Параметры --cert и --key нужно указывать вместе.")
 
     bot_token = os.environ.get("STUKACH_MAX_BOT_TOKEN")
+    public_url = os.environ.get("STUKACH_MAX_PUBLIC_URL")
+    if options.register_max_webhook and (not bot_token or not public_url):
+        parser.error("Для регистрации задайте STUKACH_MAX_BOT_TOKEN и STUKACH_MAX_PUBLIC_URL.")
+    if options.bot and not bot_token:
+        parser.error("Для запуска с --bot задайте STUKACH_MAX_BOT_TOKEN.")
+    max_bot = None
+    if options.bot or options.register_max_webhook:
+        try:
+            max_bot = MaxBot(bot_token, ca_file=os.environ.get("STUKACH_MAX_CA_FILE") or None)
+        except MaxApiError as error:
+            raise SystemExit(f"Не удалось настроить бота MAX: {error}") from None
+
     if options.register_max_webhook:
-        public_url = os.environ.get("STUKACH_MAX_PUBLIC_URL")
-        if not bot_token or not public_url:
-            parser.error("Для регистрации задайте STUKACH_MAX_BOT_TOKEN и STUKACH_MAX_PUBLIC_URL.")
         try:
             url = webhook_url(public_url)
-            MaxBot(bot_token).register(url)
+            max_bot.register(url)
         except (ValueError, MaxApiError) as error:
             raise SystemExit(f"Не удалось подключить вебхук MAX: {error}") from None
         print(f"Вебхук MAX подключён: {url}", flush=True)
         return
-
-    if options.bot and not bot_token:
-        parser.error("Для запуска с --bot задайте STUKACH_MAX_BOT_TOKEN.")
-    max_bot = MaxBot(bot_token) if options.bot else None
 
     tls = None
     if options.cert is not None:

@@ -1,9 +1,10 @@
 import hashlib
 import hmac
 import json
+import ssl
 from collections import OrderedDict
 from threading import Lock
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
@@ -68,8 +69,12 @@ def welcome_recipient(update):
 
 
 class MaxBot:
-    def __init__(self, token):
+    def __init__(self, token, ca_file=None):
         self.token = token
+        try:
+            self.tls = ssl.create_default_context(cafile=ca_file)
+        except OSError:
+            raise MaxApiError("Не удалось загрузить сертификаты из STUKACH_MAX_CA_FILE.") from None
         self.secret = hmac.new(token.encode(), b"Stukach MAX webhook v1", hashlib.sha256).hexdigest()
         self.bot_id = None
         self.lock = Lock()
@@ -84,11 +89,18 @@ class MaxBot:
         request = Request(f"{MAX_API}{path}", data, {"Content-Type": "application/json"} if data else {})
         request.add_unredirected_header("Authorization", self.token)
         try:
-            with urlopen(request, timeout=8) as response:
+            with urlopen(request, timeout=8, context=self.tls) as response:
                 result = json.loads(response.read(1024 * 1024))
         except HTTPError as error:
             error.close()
             raise MaxApiError(f"MAX API вернул HTTP {error.code}.") from None
+        except URLError as error:
+            if isinstance(error.reason, ssl.SSLCertVerificationError):
+                raise MaxApiError(
+                    "Не удалось проверить сертификат MAX API. "
+                    "Укажите доверенные сертификаты Минцифры в STUKACH_MAX_CA_FILE."
+                ) from None
+            raise MaxApiError("Не удалось подключиться к MAX API.") from None
         except (OSError, ValueError, RecursionError):
             raise MaxApiError("MAX API недоступен или вернул некорректный ответ.") from None
         if not isinstance(result, dict) or result.get("success") is False:
