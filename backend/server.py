@@ -32,13 +32,22 @@ except ImportError as error:
     project = Path(__file__).resolve().parent.parent
     environment = project / ".venv"
     interpreter = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    setup = ("Запустите start-windows.cmd из папки проекта." if os.name == "nt"
+             else "Из папки проекта выполните:\n"
+                  "  python3 -m venv .venv\n"
+                  "  .venv/bin/python -m pip install -r requirements.txt")
     if interpreter.is_file() and Path(sys.prefix).resolve() != environment.resolve():
         command = [str(interpreter), str(Path(__file__).resolve()), *sys.argv[1:]]
-        if os.name == "nt":
-            raise SystemExit(subprocess.call(command)) from None
-        os.execv(command[0], command)
-    setup = ("Запустите start-windows.cmd из папки проекта." if os.name == "nt"
-             else "Установите зависимости: python3 -m pip install -r requirements.txt")
+        try:
+            if os.name == "nt":
+                raise SystemExit(subprocess.call(command)) from None
+            os.execv(command[0], command)
+        except OSError as launch_error:
+            raise SystemExit(
+                f"Не удалось запустить {interpreter}: {launch_error.strerror}\n"
+                "Переименуйте папку .venv, чтобы создать новое окружение.\n"
+                f"{setup}"
+            ) from None
     raise SystemExit(f"Не удалось загрузить SQLCipher: {error}\n{setup}") from None
 
 from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
