@@ -24,7 +24,7 @@ from accounts import (
     AccountBanned, COOKIE_NAME, MAX_COOKIE_NAME, SessionProfiles, clean_text, cookie_token, create_session,
     ensure_active, session_account, session_token_hash, user_fields, verify_max,
 )
-from device_logs import create_device_logger, log_camera_error, log_location_error
+from device_logs import log_camera_error, log_location_error
 from max_bot import WEBHOOK_PATH, MaxApiError, MaxBot, webhook_url
 
 try:
@@ -57,6 +57,7 @@ from reports import (
     initialize_database, list_reports, open_database, report_detail, report_photo,
     reviewer_decision_stats, save_capture, set_author_ban,
 )
+from server_logs import ServerLogs
 
 
 REPORTS_PATH = "/api/reports"
@@ -122,7 +123,8 @@ def reverse_geocode(latitude, longitude):
 class AppServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, logs, **kwargs):
+        self.logs = logs
         self.session_profiles = SessionProfiles()
         super().__init__(*args, **kwargs)
 
@@ -133,7 +135,7 @@ class AppServer(ThreadingHTTPServer):
 
     def handle_error(self, request, client_address):
         if not isinstance(sys.exc_info()[1], (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
-            super().handle_error(request, client_address)
+            self.logs.server.exception("Ошибка при обработке запроса от %s", client_address[0])
 
 
 class AppHandler(SimpleHTTPRequestHandler):
@@ -147,9 +149,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         ".webp": "image/webp",
     }
 
-    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, device_logs, max_bot=None, **kwargs):
+    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, max_bot=None, **kwargs):
         self.database = database
-        self.device_logs = device_logs
         self.bot_token = bot_token
         self.max_bot = max_bot
         self.reviewer_key = reviewer_key
@@ -157,6 +158,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.secure_cookie = secure_cookie
         self.source = "max" if self.bot_token else "test"
         super().__init__(*args, directory=FRONTEND, **kwargs)
+
+    def log_message(self, format, *args):
+        message = format % args
+        message = re.sub(r"[\x00-\x1f\x7f-\x9f]", lambda match: ascii(match[0])[1:-1], message)
+        self.server.logs.server.info("%s %s", self.client_address[0], message)
 
     def end_headers(self):
         path = getattr(self, "path", "").partition("?")[0]
@@ -289,6 +295,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             account = self.account(connection, reviewer=True)
             self.send_json(HTTPStatus.OK, reviewer_decision_stats(connection, account["id"]))
             return
+        if path == f"{REVIEW_PATH}/storage":
+            self.account(connection, reviewer=True)
+            self.send_json(HTTPStatus.OK, {"low_space": self.server.logs.low_space})
+            return
         if path in (REPORTS_PATH, REVIEW_PATH):
             reviewer = path == REVIEW_PATH
             account = self.account(connection, reviewer=reviewer)
@@ -385,9 +395,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None)
-        if path in self.device_logs:
-            logger, record = self.device_logs[path]
-            record(logger, data)
+        if path == "/api/diagnostics/camera":
+            log_camera_error(self.server.logs.camera, data)
+            self.send_json(HTTPStatus.OK, {"logged": True})
+            return
+        if path == "/api/diagnostics/location":
+            log_location_error(self.server.logs.location, data)
             self.send_json(HTTPStatus.OK, {"logged": True})
             return
 
@@ -494,6 +507,14 @@ def main():
     if not bot_token and not reviewer_key:
         reviewer_key = generated_key = secrets.token_urlsafe(18)
 
+    database_directory = options.db.resolve().parent
+    default_directory = database_directory == DEFAULT_DATABASE.parent.resolve()
+    log_directory = (FRONTEND.parent if default_directory else database_directory) / "logs"
+    try:
+        logs = ServerLogs(log_directory)
+    except OSError as error:
+        raise SystemExit(f"Не удалось открыть журналы в {log_directory}: {error}") from None
+
     source = options.migrate_from
     try:
         if (source is None and options.db == DEFAULT_DATABASE and not options.db.exists()
@@ -501,20 +522,16 @@ def main():
             source = LEGACY_DATABASE
         if source is not None:
             migrate_plaintext(source, options.db)
-            print(f"Зашифрованная копия создана: {options.db}", flush=True)
+            logs.server.info("Зашифрованная копия создана: %s", options.db)
         initialize_database(options.db)
     except (OSError, ValueError, sqlite3.Error) as error:
         raise SystemExit(f"Не удалось открыть базу {options.db}: {error}") from None
     handler = partial(
         AppHandler, database=options.db, bot_token=bot_token, reviewer_key=reviewer_key, max_bot=max_bot,
         secure_cookie=tls is not None or bool(bot_token),
-        device_logs={
-            "/api/diagnostics/camera": (create_device_logger(options.db.with_suffix(".camera.log")), log_camera_error),
-            "/api/diagnostics/location": (create_device_logger(options.db.with_suffix(".location.log")), log_location_error),
-        },
     )
     try:
-        server = AppServer((options.host, options.port), handler)
+        server = AppServer((options.host, options.port), handler, logs=logs)
     except OSError as error:
         if error.errno != errno.EADDRINUSE and getattr(error, "winerror", None) != 10048:
             raise SystemExit(f"Не удалось слушать {options.host}:{options.port}: {error}\n"
@@ -531,13 +548,17 @@ def main():
             server.socket = tls.wrap_socket(server.socket, server_side=True)
         scheme = "https" if tls is not None else "http"
         browser_host = "127.0.0.1" if options.host in ("", "0.0.0.0") else options.host
-        print(f"Сайт и API: {scheme}://{browser_host}:{server.server_port}/", flush=True)
+        logs.server.info("Сайт и API: %s://%s:%s/", scheme, browser_host, server.server_port)
         if max_bot is not None:
-            print(f"Бот MAX включён: {WEBHOOK_PATH}", flush=True)
+            logs.server.info("Бот MAX включён: %s", WEBHOOK_PATH)
         if generated_key:
             print(f"Тестовый секрет проверяющего: {generated_key}", flush=True)
+        if source is not None or default_directory:
+            logs.move_device_logs(source or LEGACY_DATABASE)
+        logs.move_device_logs(options.db)
         try:
-            server.serve_forever()
+            with logs.monitor(database_directory):
+                server.serve_forever()
         except KeyboardInterrupt:
             pass
 

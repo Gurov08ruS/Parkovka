@@ -1,7 +1,4 @@
 import json
-import logging
-from logging.handlers import RotatingFileHandler
-from time import gmtime
 
 
 STAGES = {"context", "max_permissions", "stream", "preview", "capture", "switch", "flash"}
@@ -17,16 +14,6 @@ LOCATION_CODES = {
     "position": {"permission_denied", "position_unavailable", "timeout", "invalid_coordinates", "unknown_error"},
     "address": {"lookup_failed"},
 }
-
-
-def create_device_logger(path):
-    logger = logging.Logger(f"stukach.{path.stem}")
-    handler = RotatingFileHandler(path, maxBytes=256 * 1024, backupCount=2, encoding="utf-8", delay=True)
-    formatter = logging.Formatter('%(asctime)sZ %(message)s', datefmt="%Y-%m-%dT%H:%M:%S")
-    formatter.converter = gmtime
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    return logger
 
 
 def log_camera_error(logger, data):

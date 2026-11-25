@@ -207,6 +207,13 @@ main {
 }
 .review-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .review-header h1 { color: var(--heading); font-size: clamp(24px, 5vw, 34px); line-height: 1.2; }
+.review-storage-warning {
+	padding: 12px 16px;
+	border: 1px solid var(--accent);
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--accent) 12%, var(--paper));
+	font-weight: 650;
+}
 .review-workspace form { max-width: 100%; }
 .review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); align-items: start; gap: 14px; }
 .review-columns { display: grid; align-items: start; gap: 14px; }

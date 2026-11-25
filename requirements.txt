@@ -1,1 +1,2 @@
 sqlcipher3==0.6.5
+zstandard==0.25.0

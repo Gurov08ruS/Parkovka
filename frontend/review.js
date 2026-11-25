@@ -4,11 +4,27 @@ import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses
 const content = document.getElementById("review-content");
 const title = document.getElementById("review-title");
 const account = document.getElementById("review-account");
+const storageWarning = document.getElementById("review-storage-warning");
 const siteLink = document.getElementById("site-link");
 siteLink.hash = location.hash;
 const reportParam = new URLSearchParams(location.search).get("report");
 const reportId = /^[1-9][0-9]{0,18}$/.test(reportParam) ? reportParam : null;
 let version = 0;
+let storageTimer;
+
+async function refreshStorageWarning(current) {
+    try {
+        const { low_space } = await request("/api/review/storage");
+        if (current === version) storageWarning.hidden = !low_space;
+    } catch (error) {
+        if (current !== version) return;
+        if (error.status === 401 || error.status === 403) {
+            storageWarning.hidden = true;
+            return;
+        }
+    }
+    if (current === version) storageTimer = setTimeout(() => refreshStorageWarning(current), 60_000);
+}
 
 function showLogin({ mode, user }) {
     const form = element("form", "", "panel-stack");
@@ -136,6 +152,8 @@ async function showReport(current) {
 
 async function loadPage() {
     const current = ++version;
+    clearTimeout(storageTimer);
+    storageWarning.hidden = true;
     content.replaceChildren(statusMessage("Загрузка…"));
     title.hidden = true;
     try {
@@ -150,6 +168,7 @@ async function loadPage() {
         }
         title.textContent = reportId ? `Обращение №${reportId}` : "Очередь проверки";
         title.hidden = false;
+        void refreshStorageWarning(current);
         await Promise.all([showAccount(session.user, current), reportId ? showReport(current) : showQueue(current)]);
     } catch (error) {
         if (current !== version) return;
