@@ -210,8 +210,12 @@ function showProfile() {
 
     if (!user) {
         panelContent.append(button("Войти в аккаунт", () => requireAccount(showProfile), true));
-        return;
     }
+    if (session?.review_enabled) {
+        const label = user?.reviewer ? "Кабинет проверяющего" : "Вход для проверяющего";
+        panelContent.append(panelLink(label, reviewPageUrl(), Boolean(user?.reviewer)));
+    }
+    if (!user) return;
     const stats = element("section", "", "panel-stack capture-section");
     const statsMessage = statusMessage("Загружаем статистику…");
     stats.append(element("h3", "Мои обращения"), statsMessage);
@@ -221,9 +225,6 @@ function showProfile() {
     }).catch((error) => {
         if (activePanel(version)) statsMessage.textContent = error.message;
     });
-    if (user.reviewer) {
-        panelContent.append(panelLink("Кабинет проверяющего", reviewPageUrl(), true));
-    }
     const logoutMessage = statusMessage();
     const logout = button("Выйти из аккаунта", async () => {
         logout.disabled = true;
