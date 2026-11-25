@@ -20,7 +20,7 @@ function showLogin({ mode, user }) {
     } else {
         title.textContent = "Вход в аккаунт";
         if (mode === "max" && !initData()) {
-            content.replaceChildren(statusMessage("Для входа откройте приложение в MAX и войдите в аккаунт."));
+            content.replaceChildren(statusMessage("Для входа откройте приложение в MAX и войдите в аккаунт"));
             return;
         }
         if (mode === "test") {
@@ -58,7 +58,7 @@ async function showQueue(current) {
     const { reports } = await request("/api/review");
     if (current !== version) return;
     if (!reports.length) {
-        content.replaceChildren(element("p", "В очереди пока нет обращений.", "empty-card"));
+        content.replaceChildren(element("p", "В очереди пока нет обращений", "empty-card"));
         return;
     }
     const grid = element("div", "", "review-grid");
@@ -85,7 +85,7 @@ function authorControls(report, path) {
     const form = element("form", "", "panel-stack");
     if (!author.banned) {
         form.append(
-            element("p", "При блокировке все обращения автора будут автоматически отклонены."),
+            element("p", "При блокировке все обращения автора будут автоматически отклонены"),
             field("Причина блокировки", "reason", { multiline: true, maxLength: 1000, required: true }),
         );
     }
@@ -111,7 +111,7 @@ function reviewForm(report, path) {
         select.append(option);
     }
     label.append(select);
-    const note = field("Комментарий к решению. Для отказа обязателен.", "note", { multiline: true, maxLength: 1000 });
+    const note = field("Комментарий к решению. Для отказа обязателен", "note", { multiline: true, maxLength: 1000 });
     select.addEventListener("change", () => {
         note.querySelector("textarea").required = select.value === "rejected";
     });
@@ -146,7 +146,7 @@ async function loadPage() {
             account.hidden = true;
             title.hidden = !session.review_enabled;
             if (session.review_enabled) showLogin(session);
-            else content.replaceChildren(statusMessage("Кабинет проверяющего недоступен."));
+            else content.replaceChildren(statusMessage("Кабинет проверяющего недоступен"));
             return;
         }
         title.textContent = reportId ? `Обращение №${reportId}` : "Очередь проверки";

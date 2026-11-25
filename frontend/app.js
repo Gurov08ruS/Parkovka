@@ -87,10 +87,10 @@ async function requestBridgeCameraAccess() {
     } catch (error) {
         const code = error?.error?.code || "";
         if (code.endsWith("app_permission_denied")) {
-            throw new DOMException("Разрешите доступ к камере в настройках мини-приложения MAX.", "MaxAppPermissionDenied");
+            throw new DOMException("Разрешите доступ к камере в настройках мини-приложения MAX", "MaxAppPermissionDenied");
         }
         if (code.endsWith("system_permission_denied")) {
-            throw new DOMException("Разрешите доступ MAX к камере в настройках устройства.", "MaxSystemPermissionDenied");
+            throw new DOMException("Разрешите доступ MAX к камере в настройках устройства", "MaxSystemPermissionDenied");
         }
         throw error;
     }
@@ -261,7 +261,7 @@ function showEditProfile() {
 
 function showAchievements() {
     openPanel("Мои достижения");
-    panelContent.append(element("p", "Здесь собраны достижения, которые можно получить во время использования сервиса. Начисление достижений находится в разработке."));
+    panelContent.append(element("p", "Здесь собраны достижения, которые можно получить во время использования сервиса. Начисление достижений находится в разработке"));
     const grid = element("div", "", "achievement-grid");
     for (const [icon, title, description] of [
         ["★", "Первый шаг", "За первое отправленное обращение"],
@@ -300,7 +300,7 @@ async function showList(filter = "sent") {
         if (visible.length === 0) {
             message.classList.add("empty-card");
             message.textContent = filter === "drafts"
-                ? "Черновиков пока нет." : "Пока нет обращений. После отправки здесь появится их история и статус.";
+                ? "Черновиков пока нет" : "Пока нет обращений. После отправки здесь появится их история и статус";
             return;
         }
         message.remove();
@@ -342,16 +342,16 @@ async function showDetails(identifier, filter = "sent") {
 function showAbout() {
     const content = openModalPanel("О проекте");
     content.append(
-        element("p", "«ЧУЖОЕ МЕСТО» помогает сохранять доступность парковочных мест для людей с инвалидностью."),
+        element("p", "«ЧУЖОЕ МЕСТО» помогает сохранять доступность парковочных мест для людей с инвалидностью"),
         element("h3", "Как отправить обращение"),
     );
     const steps = element("ol", "", "report-events");
     for (const step of [
-        "Разрешите геолокацию и проверьте, что адрес соответствует месту.",
-        "Снимите автомобиль, госномер и парковочный знак. Если всё хорошо видно на одном кадре, второго не нужно.",
-        "Отправьте материалы на внутреннюю проверку и смотрите решение в разделе «Мои обращения».",
+        "Разрешите геолокацию и проверьте, что адрес соответствует месту",
+        "Снимите автомобиль, госномер и парковочный знак. Если всё хорошо видно на одном кадре, второго не нужно",
+        "Отправьте материалы на внутреннюю проверку и смотрите решение в разделе «Мои обращения»",
     ]) steps.append(element("li", step));
-    content.append(steps, element("p", "Результат внутренней проверки описывает качество и содержание материалов."));
+    content.append(steps, element("p", "Результат внутренней проверки описывает качество и содержание материалов"));
 }
 
 function tabFromUrl() {

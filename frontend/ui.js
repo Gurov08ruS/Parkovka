@@ -7,16 +7,17 @@ export async function request(path, body) {
             body: JSON.stringify(body),
         });
     } catch {
-        throw new Error("Не удалось связаться с сервером. Попробуйте ещё раз.");
+        throw new Error("Не удалось связаться с сервером. Попробуйте ещё раз");
     }
     let data;
     try {
         data = await response.json();
     } catch {
-        throw new Error("Сервер вернул неожиданный ответ.");
+        throw new Error("Сервер вернул неожиданный ответ");
     }
     if (!response.ok) {
-        const error = new Error(data.error || "Не удалось выполнить запрос.");
+        const message = String(data.error || "Не удалось выполнить запрос");
+        const error = new Error(message.endsWith(".") && !message.endsWith("..") ? message.slice(0, -1) : message);
         error.status = response.status;
         throw error;
     }

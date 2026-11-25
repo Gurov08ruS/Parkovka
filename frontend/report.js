@@ -36,22 +36,22 @@ const previousStep = document.querySelector("#previous-step");
 const skipDetail = document.querySelector("#skip-detail");
 const reviewPhotos = document.querySelector("#review-photos");
 
-const locationPrompt = "Разрешите доступ к геолокации, чтобы определить адрес.";
-const photoPrompt = "На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля.";
-const secureContextMessage = "По HTTP в локальной сети браузер блокирует доступ. Используйте доверенный HTTPS или откройте 127.0.0.1 на компьютере с сервером.";
+const locationPrompt = "Разрешите доступ к геолокации, чтобы определить адрес";
+const photoPrompt = "На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля";
+const secureContextMessage = "По HTTP в локальной сети браузер блокирует доступ. Используйте доверенный HTTPS или откройте 127.0.0.1 на компьютере с сервером";
 const defaultCamera = { facingMode: { ideal: "environment" } };
 const cameraMessages = new Map([
-    ["NotAllowedError", "Разрешите доступ к камере в настройках браузера и устройства."],
-    ["NotFoundError", "Камера не найдена. Подключите камеру или проверьте настройки устройства."],
-    ["NotReadableError", "Камера недоступна. Закройте приложения, которые могут её использовать, и повторите попытку."],
-    ["AbortError", "Устройство прервало запуск камеры. Попробуйте ещё раз."],
-    ["OverconstrainedError", "Камера не поддерживает выбранный режим съёмки."],
-    ["SecurityError", "Браузер запретил доступ к камере. Проверьте настройки сайта."],
-    ["InvalidStateError", "Откройте эту вкладку и попробуйте снова."],
-    ["NotSupportedError", "Устройство не поддерживает предпросмотр камеры."],
-    ["TypeError", "Не удалось включить камеру в этом браузере."],
-    ["MaxAppPermissionDenied", "Разрешите доступ к камере в настройках мини-приложения MAX."],
-    ["MaxSystemPermissionDenied", "Разрешите доступ MAX к камере в настройках устройства."],
+    ["NotAllowedError", "Разрешите доступ к камере в настройках браузера и устройства"],
+    ["NotFoundError", "Камера не найдена. Подключите камеру или проверьте настройки устройства"],
+    ["NotReadableError", "Камера недоступна. Закройте приложения, которые могут её использовать, и повторите попытку"],
+    ["AbortError", "Устройство прервало запуск камеры. Попробуйте ещё раз"],
+    ["OverconstrainedError", "Камера не поддерживает выбранный режим съёмки"],
+    ["SecurityError", "Браузер запретил доступ к камере. Проверьте настройки сайта"],
+    ["InvalidStateError", "Откройте эту вкладку и попробуйте снова"],
+    ["NotSupportedError", "Устройство не поддерживает предпросмотр камеры"],
+    ["TypeError", "Не удалось включить камеру в этом браузере"],
+    ["MaxAppPermissionDenied", "Разрешите доступ к камере в настройках мини-приложения MAX"],
+    ["MaxSystemPermissionDenied", "Разрешите доступ MAX к камере в настройках устройства"],
 ]);
 
 let session = 0;
@@ -187,8 +187,8 @@ function showStep(value) {
     document.querySelector("#photo-title").textContent = step === 1
         ? "Сделайте фото автомобиля на парковочном месте" : "Сделайте фото государственного номера";
     cameraStatus.textContent = step === 1
-        ? "В кадре должны быть видны автомобиль, парковочное место и знак или разметка."
-        : "На снимке должен быть чётко виден номер этого же автомобиля.";
+        ? "В кадре должны быть видны автомобиль, парковочное место и знак или разметка"
+        : "На снимке должен быть чётко виден номер этого же автомобиля";
     nextStep.textContent = step === 1 ? "К следующему фото" : "Перейти к проверке";
     reviewPhotos.replaceChildren();
     for (const [source, label] of [[photo && preview.src, "Фото автомобиля"], [detailPhoto && detailPreview.src, "Фото номера"]]) {
@@ -219,7 +219,7 @@ async function locate() {
         return;
     }
     if (!navigator.geolocation) {
-        locationStatus.textContent = "Этот браузер не поддерживает геолокацию.";
+        locationStatus.textContent = "Этот браузер не поддерживает геолокацию";
         deviceFailure("location", "context", "api_unavailable");
         return;
     }
@@ -260,17 +260,17 @@ async function locate() {
             deviceFailure("location", "address", "lookup_failed");
         }
         locationStatus.textContent = address
-            ? `Ближайший адрес: ${address}. ${display}.`
-            : `Адрес недоступен. В обращении будут координаты: ${display}.`;
+            ? `Ближайший адрес: ${address}. ${display}`
+            : `Адрес недоступен. В обращении будут координаты: ${display}`;
         locateButton.textContent = "Определить заново";
     } catch (error) {
         if (current !== session) return;
-        const previous = position ? " Сохранено предыдущее местоположение." : "";
         const code = ({ 1: "permission_denied", 2: "position_unavailable", 3: "timeout" })[error?.code]
             || (error?.code === "invalid_coordinates" ? "invalid_coordinates" : "unknown_error");
-        locationStatus.textContent = (code === "permission_denied"
-            ? "Разрешите доступ к геолокации в настройках сайта и устройства."
-            : "Устройство не смогло определить местоположение. Проверьте, включены ли службы геолокации, и повторите попытку.") + previous;
+        const message = code === "permission_denied"
+            ? "Разрешите доступ к геолокации в настройках сайта и устройства"
+            : "Устройство не смогло определить местоположение. Проверьте, включены ли службы геолокации, и повторите попытку";
+        locationStatus.textContent = position ? `${message}. Сохранено предыдущее местоположение` : message;
         deviceFailure("location", "position", code);
     } finally {
         if (current === session) {
@@ -287,7 +287,7 @@ async function openCamera(kind) {
         return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-        cameraFailure("context", "api_unavailable", "Этот браузер не поддерживает съёмку с камеры.");
+        cameraFailure("context", "api_unavailable", "Этот браузер не поддерживает съёмку с камеры");
         return;
     }
 
@@ -317,7 +317,7 @@ async function openCamera(kind) {
             ? error.name
             : (stage === "max_permissions" ? "MaxPermissionError" : "UnknownError");
         stopCamera();
-        cameraFailure(stage, code, cameraMessages.get(code) || "Не удалось открыть камеру. Попробуйте ещё раз.");
+        cameraFailure(stage, code, cameraMessages.get(code) || "Не удалось открыть камеру. Попробуйте ещё раз");
     } finally {
         if (current === session) {
             openingCamera = false;
@@ -330,7 +330,7 @@ async function showCamera(activeStream, current) {
     if (current !== session || document.hidden || saving) {
         activeStream.getTracks().forEach((track) => track.stop());
         if (current === session && !saving) {
-            cameraFailure("stream", "document_hidden", "Вернитесь во вкладку приложения и откройте камеру ещё раз.");
+            cameraFailure("stream", "document_hidden", "Вернитесь во вкладку приложения и откройте камеру ещё раз");
         }
         return;
     }
@@ -343,7 +343,7 @@ async function showCamera(activeStream, current) {
     track.addEventListener("ended", () => {
         if (stream === activeStream) {
             stopCamera();
-            cameraFailure("stream", "track_ended", "Камера отключилась. Откройте её ещё раз.");
+            cameraFailure("stream", "track_ended", "Камера отключилась. Откройте её ещё раз");
         }
     });
     cameraView.hidden = false;
@@ -384,22 +384,22 @@ async function playCamera() {
         playButton.hidden = true;
         cameraStatus.textContent = photoKind === "overview"
             ? photoPrompt
-            : "Крупным планом снимите знак или госномер, который хуже виден на первом кадре.";
+            : "Крупным планом снимите знак или госномер, который хуже виден на первом кадре";
         cameraViewStatus.textContent = cameraStatus.textContent;
         cameraView.scrollIntoView({ block: "nearest" });
     } catch (error) {
         if (stream !== activeStream) return;
         if (error?.name === "NotAllowedError") {
             playButton.hidden = false;
-            cameraFailure("preview", "NotAllowedError", "Камера подключена. Нажмите «Запустить предпросмотр».");
+            cameraFailure("preview", "NotAllowedError", "Камера подключена. Нажмите «Запустить предпросмотр»");
             cameraView.scrollIntoView({ block: "nearest" });
         } else if (error?.name === "preview_timeout") {
             playButton.hidden = false;
-            cameraFailure("preview", "preview_timeout", "Камера не передала кадр. Запустите предпросмотр заново или выберите другую камеру.");
+            cameraFailure("preview", "preview_timeout", "Камера не передала кадр. Запустите предпросмотр заново или выберите другую камеру");
         } else {
             const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
             stopCamera();
-            cameraFailure("preview", code, "Камера не показывает изображение. Откройте её ещё раз.");
+            cameraFailure("preview", code, "Камера не показывает изображение. Откройте её ещё раз");
         }
     } finally {
         listeners.abort();
@@ -428,7 +428,7 @@ async function switchCamera() {
         if (opposite) choices.push({ facingMode: { exact: opposite } });
         if (nextId) choices.push({ deviceId: { exact: nextId } });
         if (!choices.length) {
-            cameraStatus.textContent = "Браузер видит только одну камеру.";
+            cameraStatus.textContent = "Браузер видит только одну камеру";
             cameraViewStatus.textContent = cameraStatus.textContent;
             return;
         }
@@ -459,13 +459,13 @@ async function switchCamera() {
         }
         if (current !== session) return;
         cameraFailure("switch", "NotFoundError", stream && playButton.hidden
-            ? "Не удалось открыть другую камеру. Текущая камера восстановлена."
-            : "Не удалось открыть другую камеру. Проверьте доступные камеры в настройках браузера.");
+            ? "Не удалось открыть другую камеру. Текущая камера восстановлена"
+            : "Не удалось открыть другую камеру. Проверьте доступные камеры в настройках браузера");
     } catch (error) {
         if (current !== session) return;
         stopCamera();
         const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
-        cameraFailure("switch", code, "Не удалось переключить камеру. Откройте её ещё раз.");
+        cameraFailure("switch", code, "Не удалось переключить камеру. Откройте её ещё раз");
     } finally {
         if (current === session) {
             openingCamera = false;
@@ -487,14 +487,14 @@ async function toggleFlash() {
         if (stream !== activeStream) return;
         if (next === "torch" && track.getSettings().torch === false) throw new Error("torch unavailable");
         flash = next;
-        cameraStatus.textContent = flash === "off" ? "Вспышка выключена."
-            : "Подсветка камеры включена.";
+        cameraStatus.textContent = flash === "off" ? "Вспышка выключена"
+            : "Подсветка камеры включена";
         cameraViewStatus.textContent = cameraStatus.textContent;
     } catch (error) {
         if (stream !== activeStream) return;
         const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
         if (next === "torch") flashAvailable = false;
-        cameraFailure("flash", code, "Не удалось переключить подсветку камеры.");
+        cameraFailure("flash", code, "Не удалось переключить подсветку камеры");
     } finally {
         if (stream === activeStream) {
             changingFlash = false;
@@ -507,7 +507,7 @@ function takePhoto() {
     if (takeButton.disabled) return;
     if (!stream?.getVideoTracks().some((track) => track.readyState === "live")
         || !hasCameraFrame()) {
-        cameraFailure("capture", "frame_unavailable", "Кадр ещё недоступен. Повторите съёмку.");
+        cameraFailure("capture", "frame_unavailable", "Кадр ещё недоступен. Повторите съёмку");
         return;
     }
 
@@ -520,16 +520,16 @@ function takePhoto() {
         image = canvas.toDataURL("image/png");
     } catch (error) {
         const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
-        cameraFailure("capture", code, "Не удалось сохранить кадр. Попробуйте ещё раз.");
+        cameraFailure("capture", code, "Не удалось сохранить кадр. Попробуйте ещё раз");
         return;
     }
     const encoded = image.split(",", 2)[1];
     if (!image.startsWith("data:image/png;base64,")) {
-        cameraFailure("capture", "invalid_image", "Не удалось создать снимок PNG. Попробуйте ещё раз.");
+        cameraFailure("capture", "invalid_image", "Не удалось создать снимок PNG. Попробуйте ещё раз");
         return;
     }
     if (!encoded || encoded.length * 3 / 4 > 64 * 1024 * 1024 + 2) {
-        cameraFailure("capture", "photo_too_large", "Снимок слишком большой. Попробуйте ещё раз.");
+        cameraFailure("capture", "photo_too_large", "Снимок слишком большой. Попробуйте ещё раз");
         return;
     }
     captureId ??= crypto.randomUUID();
@@ -543,7 +543,7 @@ function takePhoto() {
         detailPreview.src = image;
         detailButton.textContent = "Переснять второе фото";
     }
-    cameraStatus.textContent = "Проверьте, что знак и госномер хорошо видны на снимках.";
+    cameraStatus.textContent = "Проверьте, что знак и госномер хорошо видны на снимках";
     lastCamera = null;
     stopCamera();
     scheduleDraft();
@@ -576,13 +576,13 @@ function flushDraft() {
             savedRevision = revision;
             if (result.submitted_at) {
                 submittedId = result.id;
-                saveStatus.textContent = `Обращение №${result.id} уже отправлено.`;
+                saveStatus.textContent = `Обращение №${result.id} уже отправлено`;
                 updateButtons();
                 break;
             }
         }
         window.removeEventListener("beforeunload", protectDraft);
-        draftStatus.textContent = submittedId === null ? "Черновик сохранён." : "Обращение уже отправлено.";
+        draftStatus.textContent = submittedId === null ? "Черновик сохранён" : "Обращение уже отправлено";
     })().finally(() => {
         if (current === session) draftSave = null;
     });
@@ -631,12 +631,12 @@ async function closeReport() {
 
 async function readDraftPhoto(identifier, kind) {
     const response = await fetch(`/api/reports/${identifier}/photos/${kind}`);
-    if (!response.ok) throw new Error("Не удалось загрузить фото из черновика. Откройте его ещё раз.");
+    if (!response.ok) throw new Error("Не удалось загрузить фото из черновика. Откройте его ещё раз");
     const blob = await response.blob();
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("Не удалось прочитать фото из черновика."));
+        reader.onerror = () => reject(new Error("Не удалось прочитать фото из черновика"));
         reader.readAsDataURL(blob);
     });
 }
@@ -673,7 +673,7 @@ async function openDraft(report, user) {
         comment.value = report.comment;
         plateNumber.value = report.plate_number || "";
         showStep(3);
-        draftStatus.textContent = "Черновик сохранён.";
+        draftStatus.textContent = "Черновик сохранён";
     } catch (error) {
         draftStatus.textContent = error.message;
     } finally {
@@ -696,12 +696,12 @@ async function saveReport(event) {
         submittedId = result.id;
         window.removeEventListener("beforeunload", protectDraft);
         draftStatus.textContent = "";
-        saveStatus.textContent = `Обращение №${result.id} принято на внутреннюю проверку.`;
+        saveStatus.textContent = `Обращение №${result.id} принято на внутреннюю проверку`;
     } catch (error) {
         saveStatus.textContent = error.message;
         if (error.status === 401) {
             requireAccount(() => {
-                saveStatus.textContent = "Вход выполнен. Повторите отправку.";
+                saveStatus.textContent = "Вход выполнен. Повторите отправку";
             });
         }
     } finally {
@@ -756,7 +756,7 @@ video.addEventListener("playing", updateButtons);
 video.addEventListener("error", () => {
     if (!stream || !video.error) return;
     stopCamera();
-    cameraFailure("preview", "video_error", "Предпросмотр прервался. Откройте камеру ещё раз.");
+    cameraFailure("preview", "video_error", "Предпросмотр прервался. Откройте камеру ещё раз");
 });
 playButton.addEventListener("click", playCamera);
 switchButton.addEventListener("click", switchCamera);
@@ -765,7 +765,7 @@ takeButton.addEventListener("click", takePhoto);
 cancelCameraButton.addEventListener("click", () => {
     lastCamera = null;
     stopCamera();
-    cameraStatus.textContent = photo ? "Проверьте, что знак и госномер хорошо видны на снимках." : photoPrompt;
+    cameraStatus.textContent = photo ? "Проверьте, что знак и госномер хорошо видны на снимках" : photoPrompt;
     (photoKind === "detail" ? detailButton : cameraButton).focus();
 });
 form.addEventListener("submit", saveReport);
@@ -773,7 +773,7 @@ document.addEventListener("visibilitychange", () => {
     if (document.hidden && dialog.open && !saving) void autosaveDraft();
     if (document.hidden && stream) {
         stopCamera();
-        cameraFailure("stream", "document_hidden", "Камера остановлена, пока вкладка была скрыта. Откройте её ещё раз.");
+        cameraFailure("stream", "document_hidden", "Камера остановлена, пока вкладка была скрыта. Откройте её ещё раз");
     }
 });
 window.addEventListener("online", () => {

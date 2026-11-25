@@ -1,5 +1,7 @@
 import { element } from "./ui.js";
 
+const banNotice = "Автоматически отклонено из-за блокировки аккаунта";
+
 export const statuses = {
     draft: "Черновик",
     pending: "Ожидает проверки",
@@ -24,11 +26,11 @@ function reportStatus(report) {
 
 function appendBanNotice(container, report, banLink) {
     if (!report.auto_rejected) return;
-    const notice = element("p", "Автоматически отклонено из-за блокировки аккаунта.", "report-ban-notice");
+    const notice = element("p", banNotice, "report-ban-notice");
     if (banLink && report.ban_report_id) {
         const link = element("a", `Обращение №${report.ban_report_id}, из-за которого заблокировали аккаунт`);
         link.href = banLink(report.ban_report_id);
-        notice.append(" ", link);
+        notice.append(element("br"), link);
     }
     container.append(notice);
 }
@@ -106,7 +108,10 @@ export function appendReportDetails(container, report, path, banLink) {
         const log = element("ol", "", "report-events");
         for (const entry of report.events) {
             const item = element("li", `${statuses[entry.status]} · ${dateLabel(entry.occurred_at)}`);
-            if (entry.note) item.append(element("p", entry.note, "report-comment"));
+            if (entry.note) {
+                const note = entry.note === `${banNotice}.` ? banNotice : entry.note;
+                item.append(element("p", note, "report-comment"));
+            }
             log.append(item);
         }
         container.append(element("h3", "История статусов"), log);
