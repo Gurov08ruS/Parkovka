@@ -28,6 +28,35 @@ export function initData() {
     return window.WebApp?.initData || new URLSearchParams(location.hash.slice(1)).get("WebAppData");
 }
 
+let sessionRequest = null;
+let maxLaunchChecked = false;
+
+async function fetchSession() {
+    const launchData = initData();
+    if (!maxLaunchChecked && launchData) {
+        try {
+            const session = await request("/api/session", { init_data: launchData });
+            maxLaunchChecked = true;
+            return session;
+        } catch (error) {
+            if (error.status !== 400 && error.status !== 401) throw error;
+            maxLaunchChecked = true;
+        }
+    }
+    return request("/api/session");
+}
+
+export function loadSession() {
+    sessionRequest ??= fetchSession().finally(() => { sessionRequest = null; });
+    return sessionRequest;
+}
+
+export async function logoutSession() {
+    maxLaunchChecked = true;
+    await sessionRequest?.catch(() => {});
+    return request("/api/logout", {});
+}
+
 export function element(tag, text = "", className = "") {
     const node = document.createElement(tag);
     if (text !== "") node.textContent = text;

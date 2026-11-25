@@ -67,7 +67,6 @@ def initialize_database(database):
             connection.execute("ALTER TABLE report_captures_new RENAME TO report_captures")
             connection.execute("PRAGMA user_version = 1")
         for table, columns in (
-            ("accounts", {"photo_url": "TEXT"}),
             ("reports", {
                 "owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT",
                 "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT",
@@ -86,6 +85,13 @@ def initialize_database(database):
             for ban in connection.execute("SELECT account_id, reviewer_id FROM account_bans WHERE active = 1"):
                 reject_banned_reports(connection, ban["account_id"], ban["reviewer_id"])
             connection.execute("PRAGMA user_version = 2")
+        if connection.execute("PRAGMA user_version").fetchone()[0] < 3:
+            connection.execute("PRAGMA secure_delete = ON")
+            columns = {column["name"] for column in connection.execute("PRAGMA table_info(accounts)")}
+            for name in ("first_name", "last_name", "photo_url"):
+                if name in columns:
+                    connection.execute(f"ALTER TABLE accounts DROP COLUMN {name}")
+            connection.execute("PRAGMA user_version = 3")
 
 
 def coordinates(data):
@@ -248,7 +254,7 @@ def report_detail(connection, identifier, account, reviewer):
             report["capture_id"] = row["capture_id"]
     if reviewer:
         author = connection.execute(
-            """SELECT accounts.id, accounts.max_id, accounts.first_name, accounts.last_name,
+            """SELECT accounts.id, accounts.max_id,
                       COALESCE(account_bans.active, 0) AS banned,
                       account_bans.reason AS ban_reason
                FROM reports JOIN accounts ON accounts.id = reports.owner_id

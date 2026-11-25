@@ -5,6 +5,7 @@ import re
 import secrets
 import time
 from http.cookies import CookieError, SimpleCookie
+from threading import Lock
 from urllib.parse import parse_qsl, urlsplit
 
 
@@ -16,6 +17,34 @@ MAX_ID = re.compile(r"[1-9][0-9]{0,18}")
 
 class AccountBanned(Exception):
     pass
+
+
+class SessionProfiles:
+    def __init__(self):
+        self.lock = Lock()
+        self.profiles = {}
+        self.next_cleanup = 0
+
+    def get(self, token_hash):
+        with self.lock:
+            expiry, profile = self.profiles.get(token_hash, (0, None))
+            if expiry > time.time():
+                return profile
+            self.profiles.pop(token_hash, None)
+            return None
+
+    def put(self, token_hash, expiry, profile):
+        with self.lock:
+            now = time.time()
+            if now >= self.next_cleanup:
+                for key in [key for key, (deadline, _) in self.profiles.items() if deadline <= now]:
+                    del self.profiles[key]
+                self.next_cleanup = now + 60
+            self.profiles[token_hash] = (expiry, profile)
+
+    def remove(self, token_hash):
+        with self.lock:
+            self.profiles.pop(token_hash, None)
 
 
 def ensure_active(connection, account_id):
@@ -93,34 +122,36 @@ def cookie_token_hash(header):
     return None
 
 
-def create_session(connection, source, fields, old_token, photo_url=None):
+def create_session(connection, source, max_id, old_token):
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(
-        """INSERT INTO accounts (source, max_id, first_name, last_name) VALUES (?, ?, ?, ?)
-           ON CONFLICT (source, max_id) DO NOTHING""",
-        (source, *fields),
+        "INSERT INTO accounts (source, max_id) VALUES (?, ?) ON CONFLICT (source, max_id) DO NOTHING",
+        (source, max_id),
     )
     account = connection.execute(
-        "SELECT * FROM accounts WHERE source = ? AND max_id = ?", (source, fields[0]),
+        "SELECT id FROM accounts WHERE source = ? AND max_id = ?", (source, max_id),
     ).fetchone()
     ensure_active(connection, account["id"])
-    if source == "max":
-        connection.execute("UPDATE accounts SET photo_url = ? WHERE id = ?", (photo_url, account["id"]))
+    current = session_account(connection, old_token, source)
+    if current is not None and current["id"] == account["id"]:
+        return None, current
     now = int(time.time())
     token = secrets.token_urlsafe(32)
     connection.execute("DELETE FROM sessions WHERE expires_at <= ? OR token_hash = ?", (now, old_token))
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
     connection.execute(
         "INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)",
-        (hashlib.sha256(token.encode()).hexdigest(), account["id"], now + SESSION_SECONDS),
+        (token_hash, account["id"], now + SESSION_SECONDS),
     )
-    return token
+    return token, session_account(connection, token_hash, source)
 
 
 def session_account(connection, token_hash, source):
     if token_hash is None:
         return None
     return connection.execute(
-        """SELECT accounts.*, sessions.review_grant FROM sessions JOIN accounts
+        """SELECT accounts.id, accounts.source, accounts.max_id, sessions.review_grant, sessions.expires_at
+           FROM sessions JOIN accounts
            ON sessions.account_id = accounts.id
            WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND accounts.source = ?""",
         (token_hash, int(time.time()), source),

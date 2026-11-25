@@ -1,4 +1,4 @@
-import { request, initData, element, statusMessage, button, submitButton, field, formHandler, panelLink } from "./ui.js";
+import { request, initData, loadSession, logoutSession, element, statusMessage, button, submitButton, field, formHandler, panelLink } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl } from "./report-view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -28,7 +28,7 @@ function showSessionError(content, error, retry) {
         const message = statusMessage();
         content.append(button("Выйти из аккаунта", async () => {
             try {
-                setSession(await request("/api/logout", {}));
+                setSession(await logoutSession());
                 if (panel.open) panel.close();
                 retry();
             } catch (logoutError) {
@@ -118,7 +118,7 @@ export async function requireAccount(action) {
     const version = panelVersion;
     try {
         if (loginRequest) await loginRequest;
-        const data = await request("/api/session");
+        const data = await loadSession();
         if (version !== panelVersion) return;
         setSession(data);
     } catch (error) {
@@ -192,15 +192,25 @@ function showProfile() {
     const version = openPanel("Мой аккаунт");
     const user = session?.user;
     const identity = element("div", "", "profile-card");
-    const avatar = element("span", user ? user.first_name.slice(0, 1).toUpperCase() : "○", "profile-avatar");
+    const avatar = element("span", user?.first_name.slice(0, 1).toUpperCase() || "○", "profile-avatar");
     avatar.setAttribute("aria-hidden", "true");
+    if (user?.photo_url) {
+        const photo = element("img");
+        photo.alt = "";
+        photo.hidden = true;
+        photo.onload = () => { photo.hidden = false; };
+        photo.onerror = () => { photo.hidden = true; };
+        photo.src = user.photo_url;
+        avatar.append(photo);
+    }
     const text = element("div");
-    text.append(element("strong", user ? `${user.first_name} ${user.last_name}`.trim() : "Гость"),
+    const name = user ? `${user.first_name} ${user.last_name}`.trim() || "Пользователь MAX" : "Гость";
+    text.append(element("strong", name),
         element("p", user ? `ID MAX: ${user.max_id}` : "Войдите, чтобы отправлять обращения"));
     identity.append(avatar, text);
     panelContent.append(identity);
     const menu = element("div", "", "profile-menu");
-    if (user) menu.append(button("Личные данные", showEditProfile));
+    if (user && session.mode === "test") menu.append(button("Личные данные", showEditProfile));
     menu.append(
         button("Мои достижения", () => navigate("achievements")),
         button("Черновики", () => navigate("history", null, "drafts")),
@@ -229,7 +239,7 @@ function showProfile() {
     const logout = button("Выйти из аккаунта", async () => {
         logout.disabled = true;
         try {
-            setSession(await request("/api/logout", {}));
+            setSession(await logoutSession());
             if (activePanel(version)) showProfile();
         } catch (error) {
             logoutMessage.textContent = error.message;
@@ -248,7 +258,7 @@ function showEditProfile() {
     profile.append(
         element("p", `ID MAX: ${user.max_id}`),
         field("Имя", "first_name", { value: user.first_name, maxLength: 80, required: true }),
-        field("Фамилия", "last_name", { value: user.last_name, maxLength: 80, required: session.mode === "test" }),
+        field("Фамилия", "last_name", { value: user.last_name, maxLength: 80, required: true }),
         submitButton("Сохранить профиль"),
         profileMessage,
     );
@@ -391,7 +401,7 @@ function renderTab(tab, identifier, filter = "sent") {
     }
     if (tab === "profile") {
         const version = panelVersion;
-        request("/api/session").then((data) => {
+        loadSession().then((data) => {
             if (!activePanel(version)) return;
             setSession(data);
             showProfile();
@@ -440,7 +450,7 @@ window.addEventListener("popstate", renderLocation);
 $("open-about").addEventListener("click", showAbout);
 $("home-reports").addEventListener("click", () => navigate("history"));
 $("header-profile")?.addEventListener("click", () => navigate("profile"));
-request("/api/session").then((data) => {
+loadSession().then((data) => {
     if (session === null) setSession(data);
 }).catch(() => {});
 if (tabFromUrl() !== "home") renderLocation();

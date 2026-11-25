@@ -1,4 +1,4 @@
-import { request, initData, element, statusMessage, button, submitButton, field, formHandler, panelLink } from "./ui.js";
+import { request, initData, loadSession, element, statusMessage, button, submitButton, field, formHandler, panelLink } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses } from "./report-view.js";
 
 const content = document.getElementById("review-content");
@@ -42,7 +42,7 @@ async function showAccount(user, current) {
     const message = statusMessage("Загружаем статистику…");
     account.hidden = false;
     account.replaceChildren(
-        element("h2", `${user.first_name} ${user.last_name}`.trim()),
+        element("h2", `${user.first_name} ${user.last_name}`.trim() || `ID MAX: ${user.max_id}`),
         element("p", "Мои решения"),
         message,
     );
@@ -74,7 +74,6 @@ function authorControls(report, path) {
     const card = element("section", "", "panel-stack capture-section");
     card.append(
         element("h3", "Автор обращения"),
-        element("p", `${author.first_name} ${author.last_name}`.trim()),
         element("p", `ID MAX: ${author.max_id}`),
         element("p", author.banned ? "Аккаунт заблокирован" : "Аккаунт активен"),
         decisionStats(author.stats),
@@ -140,7 +139,7 @@ async function loadPage() {
     content.replaceChildren(statusMessage("Загрузка…"));
     title.hidden = true;
     try {
-        const session = await request("/api/session");
+        const session = await loadSession();
         if (current !== version) return;
         if (!session.user?.reviewer) {
             account.hidden = true;

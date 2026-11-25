@@ -20,7 +20,7 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from accounts import (
-    AccountBanned, COOKIE_NAME, SESSION_SECONDS, clean_text, cookie_token_hash, create_session, ensure_active,
+    AccountBanned, COOKIE_NAME, SESSION_SECONDS, SessionProfiles, clean_text, cookie_token_hash, create_session, ensure_active,
     session_account, user_fields, verify_max,
 )
 from device_logs import create_device_logger, log_camera_error, log_location_error
@@ -121,6 +121,10 @@ def reverse_geocode(latitude, longitude):
 class AppServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
 
+    def __init__(self, *args, **kwargs):
+        self.session_profiles = SessionProfiles()
+        super().__init__(*args, **kwargs)
+
     def server_bind(self):
         if os.name == "nt":
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
@@ -193,11 +197,16 @@ class AppHandler(SimpleHTTPRequestHandler):
         cookie[COOKIE_NAME]["secure"] = self.secure_cookie
         return ("Set-Cookie", cookie[COOKIE_NAME].OutputString())
 
-    def session_data(self, account):
+    def session_data(self, account, token_hash=None):
         user = None
         if account is not None:
-            user = {field: account[field] for field in ("max_id", "first_name", "last_name", "photo_url")}
-            user["reviewer"] = self.is_reviewer(account)
+            token_hash = token_hash or cookie_token_hash(self.headers.get("Cookie"))
+            profile = self.server.session_profiles.get(token_hash)
+            first_name, last_name, photo_url = profile or ("", "", None)
+            user = {
+                "max_id": account["max_id"], "first_name": first_name, "last_name": last_name,
+                "photo_url": photo_url, "reviewer": self.is_reviewer(account),
+            }
         return {"mode": self.source, "review_enabled": bool(self.reviewer_key), "user": user}
 
     def account(self, connection, *, required=True, reviewer=False):
@@ -340,15 +349,23 @@ class AppHandler(SimpleHTTPRequestHandler):
                     raise ApiError(HTTPStatus.UNAUTHORIZED, str(error)) from error
             else:
                 fields = user_fields((data.get("max_id"), data.get("first_name"), data.get("last_name")), test=True)
+            max_id, first_name, last_name = fields
             with connection:
-                token = create_session(connection, self.source, fields, token_hash, photo_url)
-            account = session_account(connection, cookie_token_hash(f"{COOKIE_NAME}={token}"), self.source)
-            self.send_json(HTTPStatus.OK, self.session_data(account), self.session_cookie(token, SESSION_SECONDS))
+                token, account = create_session(connection, self.source, max_id, token_hash)
+            profiles = self.server.session_profiles
+            headers = ()
+            if token is not None:
+                profiles.remove(token_hash)
+                token_hash = hashlib.sha256(token.encode()).hexdigest()
+                headers = (self.session_cookie(token, SESSION_SECONDS),)
+            profiles.put(token_hash, account["expires_at"], (first_name, last_name, photo_url))
+            self.send_json(HTTPStatus.OK, self.session_data(account, token_hash), *headers)
             return
 
         if path == "/api/logout":
             with connection:
                 connection.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            self.server.session_profiles.remove(token_hash)
             self.send_json(HTTPStatus.OK, self.session_data(None), self.session_cookie("", 0))
             return
 
@@ -360,17 +377,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/profile":
-            fields = user_fields(
-                (account["max_id"], data.get("first_name"), data.get("last_name")), test=self.source == "test",
+            if self.source == "max":
+                raise ApiError(HTTPStatus.FORBIDDEN, "Имя, фамилия и фото берутся из профиля MAX.")
+            _, first_name, last_name = user_fields(
+                (account["max_id"], data.get("first_name"), data.get("last_name")), test=True,
             )
-            with connection:
-                connection.execute("BEGIN IMMEDIATE")
-                ensure_active(connection, account["id"])
-                connection.execute(
-                    "UPDATE accounts SET first_name = ?, last_name = ? WHERE id = ?",
-                    (*fields[1:], account["id"]),
-                )
-            self.send_json(HTTPStatus.OK, self.session_data(self.account(connection)))
+            self.server.session_profiles.put(token_hash, account["expires_at"], (first_name, last_name, None))
+            self.send_json(HTTPStatus.OK, self.session_data(account))
             return
 
         if path == "/api/reviewer":
