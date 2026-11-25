@@ -1,3 +1,6 @@
+import { request, initData, element, statusMessage, button, submitButton, field, formHandler, panelLink } from "./ui.js";
+import { appendReportDetails, reportCard, decisionStats, reviewPageUrl } from "./report-view.js";
+
 const $ = (id) => document.getElementById(id);
 const accountDialog = $("account-dialog");
 const accountForm = $("account-form");
@@ -9,14 +12,6 @@ const tabTitles = { home: "Главная", history: "Мои обращения"
 let currentTab = "home";
 let tabAnimation;
 let loginRequest = null;
-const statuses = {
-    draft: "Черновик",
-    pending: "Ожидает проверки",
-    under_review: "На проверке",
-    approved: "Проверено",
-    rejected: "Отклонено",
-};
-
 let session = null;
 let afterLogin = null;
 let panelVersion = 0;
@@ -36,35 +31,6 @@ function showSessionError(content, error, retry) {
             }
         }), message);
     }
-}
-
-export async function request(path, body) {
-    let response;
-    try {
-        response = await fetch(path, body === undefined ? {} : {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
-    } catch {
-        throw new Error("Не удалось связаться с сервером. Попробуйте ещё раз.");
-    }
-    let data;
-    try {
-        data = await response.json();
-    } catch {
-        throw new Error("Сервер вернул неожиданный ответ.");
-    }
-    if (!response.ok) {
-        const error = new Error(data.error || "Не удалось выполнить запрос.");
-        error.status = response.status;
-        throw error;
-    }
-    return data;
-}
-
-function initData() {
-    return window.WebApp?.initData || new URLSearchParams(location.hash.slice(1)).get("WebAppData");
 }
 
 function setSession(data) {
@@ -196,45 +162,6 @@ accountDialog.addEventListener("close", () => {
     if (!accountDialog.open && currentTab === "home") afterLogin = null;
 });
 
-function element(tag, text = "", className = "") {
-    const node = document.createElement(tag);
-    if (text) node.textContent = text;
-    if (className) node.className = className;
-    return node;
-}
-
-function statusMessage(text = "") {
-    const message = element("p", text);
-    message.setAttribute("role", "status");
-    return message;
-}
-
-function button(text, action, primary = false) {
-    const node = element("button", text, primary ? "panel-button primary-button" : "panel-button");
-    node.type = "button";
-    node.addEventListener("click", action);
-    return node;
-}
-
-function submitButton(text) {
-    const node = element("button", text, "panel-button primary-button");
-    node.type = "submit";
-    return node;
-}
-
-function field(label, name, options = {}) {
-    const wrapper = element("label", label);
-    const input = element(options.multiline ? "textarea" : "input");
-    input.name = name;
-    if (options.type) input.type = options.type;
-    if (options.maxLength) input.maxLength = options.maxLength;
-    if (options.value) input.value = options.value;
-    if (options.required) input.required = true;
-    if (options.multiline) input.rows = 3;
-    wrapper.append(input);
-    return wrapper;
-}
-
 function openModalPanel(title) {
     $("panel-title").textContent = title;
     const content = $("panel-content");
@@ -254,22 +181,6 @@ function openPanel(title) {
 
 function activePanel(version) {
     return currentTab !== "home" && panelVersion === version;
-}
-
-function formHandler(form, message, path, onSuccess) {
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const submit = form.querySelector("button[type='submit']");
-        submit.disabled = true;
-        message.textContent = "Подождите…";
-        try {
-            onSuccess(await request(path, Object.fromEntries(new FormData(form))));
-        } catch (error) {
-            message.textContent = error.message;
-        } finally {
-            submit.disabled = false;
-        }
-    });
 }
 
 function showProfile() {
@@ -296,22 +207,17 @@ function showProfile() {
         panelContent.append(button("Войти в аккаунт", () => requireAccount(showProfile), true));
         return;
     }
+    const stats = element("section", "", "panel-stack capture-section");
+    const statsMessage = statusMessage("Загружаем статистику…");
+    stats.append(element("h3", "Мои обращения"), statsMessage);
+    identity.after(stats);
+    request("/api/reports/stats").then((data) => {
+        if (activePanel(version)) statsMessage.replaceWith(decisionStats(data));
+    }).catch((error) => {
+        if (activePanel(version)) statsMessage.textContent = error.message;
+    });
     if (user.reviewer) {
-        panelContent.append(button("Очередь проверки", () => navigate("profile", "queue"), true));
-    } else if (session.review_enabled) {
-        const review = element("form", "", "panel-stack capture-section");
-        const message = statusMessage();
-        review.append(
-            element("h3", "Вход для проверяющего"),
-            field("Секрет проверяющего", "key", { type: "password", required: true }),
-            submitButton("Войти в очередь проверки"), message,
-        );
-        formHandler(review, message, "/api/reviewer", (data) => {
-            review.reset();
-            setSession(data);
-            if (activePanel(version)) navigate("profile", "queue");
-        });
-        panelContent.append(review);
+        panelContent.append(panelLink("Кабинет проверяющего", reviewPageUrl(), true));
     }
     const logoutMessage = statusMessage();
     const logout = button("Выйти из аккаунта", async () => {
@@ -368,87 +274,38 @@ function showAchievements() {
     panelContent.append(grid);
 }
 
-function dateLabel(value) {
-    return value ? new Date(value).toLocaleString("ru-RU") : "";
-}
-
-function placeLabel(report) {
-    if (report.address) return report.address;
-    if (report.latitude !== null) return `${report.latitude.toFixed(5)}, ${report.longitude.toFixed(5)}`;
-    return "Местоположение отсутствует";
-}
-
-function reportStatus(report) {
-    return element("span", statuses[report.status] || report.status, `report-status status-${report.status}`);
-}
-
-function appendBanNotice(container, report, reviewer) {
-    if (!report.auto_rejected) return;
-    const notice = element("p", "Автоматически отклонено из-за блокировки аккаунта.", "report-ban-notice");
-    if (reviewer && report.ban_report_id) {
-        const link = element("a", `Обращение №${report.ban_report_id}, из-за которого заблокировали аккаунт`);
-        link.href = tabUrl("profile", report.ban_report_id).href;
-        notice.append(" ", link);
+async function showList(filter = "sent") {
+    const version = openPanel("Мои обращения");
+    const filters = element("div", "", "report-filter");
+    for (const [name, label] of [["sent", "Отправленные"], ["drafts", "Черновики"]]) {
+        const control = button(label, () => showList(name), filter === name);
+        control.setAttribute("aria-pressed", String(filter === name));
+        filters.append(control);
     }
-    container.append(notice);
-}
-
-async function showList(reviewer = false, filter = "sent") {
-    const version = openPanel(reviewer ? "Очередь проверки" : "Мои обращения");
     const message = statusMessage("Загружаем обращения…");
-    if (!reviewer) {
-        const filters = element("div", "", "report-filter");
-        for (const [name, label] of [["sent", "Отправленные"], ["drafts", "Черновики"]]) {
-            const control = button(label, () => showList(false, name), filter === name);
-            control.setAttribute("aria-pressed", String(filter === name));
-            filters.append(control);
-        }
-        panelContent.append(filters);
-    }
-    panelContent.append(message);
+    panelContent.append(filters, message);
     try {
-        const { reports } = await request(reviewer ? "/api/review" : "/api/reports");
+        const { reports } = await request("/api/reports");
         if (!activePanel(version)) return;
-        const visible = reviewer ? reports : reports.filter((report) => {
+        const visible = reports.filter((report) => {
             const draft = report.status === "draft" || (report.auto_rejected && !report.submitted_at);
             return draft === (filter === "drafts");
         });
         if (visible.length === 0) {
             message.classList.add("empty-card");
-            message.textContent = reviewer ? "В очереди пока нет обращений." : filter === "drafts"
+            message.textContent = filter === "drafts"
                 ? "Черновиков пока нет." : "Пока нет обращений. После отправки здесь появится их история и статус.";
-        } else {
-            message.remove();
+            return;
         }
+        message.remove();
         for (const report of visible) {
-            const card = element("article", "", "report-card");
-            const heading = element("div", "", "report-card-head");
-            heading.append(element("strong", `Обращение №${report.id}`), reportStatus(report));
-            card.append(heading, element("small", `${placeLabel(report)} · ${dateLabel(report.submitted_at || report.created_at)}`));
-            appendBanNotice(card, report, reviewer);
-            if (report.plate_number) {
-                card.append(element("p", `Госномер: ${report.plate_number} · Не подтверждён`, "report-plate-summary"));
-            }
-            if (report.has_photo) {
-                const gallery = element("div", "", "report-photos");
-                for (const [exists, kind, alt] of [[report.has_photo, "overview", "Основной снимок"], [report.has_detail_photo, "detail", "Дополнительный снимок"]]) {
-                    if (!exists) continue;
-                    const image = element("img");
-                    image.src = `${reviewer ? "/api/review" : "/api/reports"}/${report.id}/photos/${kind}`;
-                    image.alt = alt;
-                    gallery.append(image);
-                }
-                card.append(gallery);
-            }
-            card.append(button("Подробнее об обращении", () => {
-                if (reviewer) navigate("profile", report.id);
-                else showDetails(report.id, false, filter);
-            }));
-            panelContent.append(card);
+            const control = button("Подробнее об обращении", () => showDetails(report.id, filter));
+            panelContent.append(reportCard(report, `/api/reports/${report.id}`, control));
         }
     } catch (error) {
+        if (!activePanel(version)) return;
         message.textContent = error.message;
-        if (activePanel(version)) panelContent.append(button("Повторить", () => showList(reviewer, filter)));
+        panelContent.append(button("Повторить", () => showList(filter)));
     }
 }
 
@@ -456,126 +313,21 @@ export function showHistory(identifier) {
     navigate("history", identifier);
 }
 
-async function showDetails(identifier, reviewer = false, filter = "sent") {
+async function showDetails(identifier, filter = "sent") {
     const version = openPanel(`Обращение №${identifier}`);
     const message = statusMessage("Загружаем обращение…");
-    panelContent.append(button("К списку", () => {
-        if (reviewer) navigate("profile", "queue");
-        else showList(false, filter);
-    }), message);
-    const path = `${reviewer ? "/api/review" : "/api/reports"}/${identifier}`;
+    panelContent.append(button("К списку", () => showList(filter)), message);
+    const path = `/api/reports/${identifier}`;
     try {
         const report = await request(path);
         if (!activePanel(version)) return;
         message.remove();
-        panelContent.append(reportStatus(report));
-        appendBanNotice(panelContent, report, reviewer);
-        panelContent.append(
-            element("p", placeLabel(report)),
-            element("p", `Создано ${dateLabel(report.created_at)}`),
-        );
-        if (report.captured_at) panelContent.append(element("p", `Снято ${dateLabel(report.captured_at)}`));
-        if (report.plate_number) {
-            const plate = element("div", "", "report-plate-summary");
-            plate.append(element("strong", report.plate_number), element("span", "Не подтверждён"));
-            panelContent.append(plate);
-        }
-        if (report.comment) panelContent.append(element("p", report.comment, "report-comment"));
-        const gallery = element("div", "", "report-photos");
-        for (const [exists, kind, label] of [
-            [report.has_photo, "overview", "Основной снимок"],
-            [report.has_detail_photo, "detail", "Дополнительный снимок"],
-        ]) {
-            if (!exists) continue;
-            const image = element("img");
-            image.src = `${path}/photos/${kind}`;
-            image.alt = label;
-            const figure = element("figure");
-            figure.append(image, element("figcaption", label));
-            gallery.append(figure);
-        }
-        if (gallery.children.length) panelContent.append(gallery);
-        if (report.events.length) {
-            const log = element("ol", "", "report-events");
-            for (const entry of report.events) {
-                const item = element("li", `${statuses[entry.status]} · ${dateLabel(entry.occurred_at)}`);
-                if (entry.note) item.append(element("p", entry.note, "report-comment"));
-                log.append(item);
-            }
-            panelContent.append(element("h3", "История статусов"), log);
-        }
-        if (reviewer && report.author) showAuthorControls(report, path, version);
-        if (reviewer && ["pending", "under_review"].includes(report.status)) {
-            showReviewForm(report, path, version);
-        }
+        appendReportDetails(panelContent, report, path);
     } catch (error) {
+        if (!activePanel(version)) return;
         message.textContent = error.message;
-        if (activePanel(version)) panelContent.append(button("Повторить", () => showDetails(identifier, reviewer, filter)));
+        panelContent.append(button("Повторить", () => showDetails(identifier, filter)));
     }
-}
-
-function showAuthorControls(report, path, version) {
-    const author = report.author;
-    const card = element("section", "", "panel-stack capture-section");
-    card.append(
-        element("h3", "Автор обращения"),
-        element("p", `${author.first_name} ${author.last_name}`.trim()),
-        element("p", `ID MAX: ${author.max_id}`),
-        element("p", author.banned ? "Аккаунт заблокирован" : "Аккаунт активен"),
-    );
-    if (author.banned && author.ban_reason) {
-        card.append(element("p", `Причина: ${author.ban_reason}`, "report-comment"));
-    }
-    const form = element("form", "", "panel-stack");
-    const message = statusMessage();
-    if (!author.banned) {
-        form.append(
-            element("p", "При блокировке все обращения автора будут автоматически отклонены."),
-            field("Причина блокировки", "reason", { multiline: true, maxLength: 1000, required: true }),
-        );
-    }
-    const submit = submitButton(author.banned ? "Разблокировать аккаунт" : "Заблокировать аккаунт");
-    form.append(submit, message);
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        submit.disabled = true;
-        message.textContent = "Сохраняем…";
-        try {
-            const reason = author.banned ? "" : new FormData(form).get("reason");
-            await request(`${path}/author-ban`, { banned: !author.banned, reason });
-            if (activePanel(version)) showDetails(report.id, true);
-        } catch (error) {
-            message.textContent = error.message;
-        } finally {
-            submit.disabled = false;
-        }
-    });
-    card.append(form);
-    panelContent.append(card);
-}
-
-function showReviewForm(report, path, version) {
-    const form = element("form", "", "panel-stack capture-section");
-    const label = element("label", "Новый статус");
-    const select = element("select");
-    select.name = "status";
-    const choices = report.status === "pending" ? ["under_review", "approved", "rejected"] : ["approved", "rejected"];
-    for (const value of choices) {
-        const option = element("option", statuses[value]);
-        option.value = value;
-        select.append(option);
-    }
-    label.append(select);
-    const note = field("Комментарий к решению. Для отказа обязателен.", "note", { multiline: true, maxLength: 1000 });
-    select.addEventListener("change", () => {
-        note.querySelector("textarea").required = select.value === "rejected";
-    });
-    const message = statusMessage();
-    form.append(element("h3", "Решение проверяющего"), label, note, submitButton("Сохранить решение"), message);
-    formHandler(form, message, `${path}/status`, () => {
-        if (activePanel(version)) showDetails(report.id, true);
-    });
-    panelContent.append(form);
 }
 
 function showAbout() {
@@ -633,34 +385,28 @@ function renderTab(tab, identifier, filter = "sent") {
         request("/api/session").then((data) => {
             if (!activePanel(version)) return;
             setSession(data);
-            if (data.user?.reviewer && identifier) {
-                if (identifier === "queue") showList(true);
-                else showDetails(identifier, true);
-            } else {
-                showProfile();
-            }
+            showProfile();
         }).catch((error) => {
-            if (activePanel(version)) showSessionError(panelContent, error, () => renderTab("profile", identifier));
+            if (activePanel(version)) showSessionError(panelContent, error, () => renderTab("profile"));
         });
         return;
     }
     requireAccount(() => {
         if (identifier) showDetails(identifier);
-        else showList(false, filter);
+        else showList(filter);
     });
 }
 
-function tabUrl(tab, identifier) {
+function tabUrl(tab) {
     const url = new URL(location.href);
     if (tab === "home") url.searchParams.delete("tab");
     else url.searchParams.set("tab", tab);
-    if (tab === "profile" && identifier) url.searchParams.set("review", identifier);
-    else url.searchParams.delete("review");
+    url.searchParams.delete("review");
     return url;
 }
 
 function navigate(tab, identifier, filter) {
-    const url = tabUrl(tab, identifier);
+    const url = tabUrl(tab);
     if (url.href !== location.href) history.pushState(null, "", url);
     renderTab(tab, identifier, filter);
 }
@@ -668,9 +414,11 @@ function navigate(tab, identifier, filter) {
 function renderLocation() {
     const tab = tabFromUrl();
     const review = new URL(location.href).searchParams.get("review");
-    const identifier = tab === "profile" && (review === "queue" || /^[1-9][0-9]{0,18}$/.test(review))
-        ? review : undefined;
-    renderTab(tab, identifier);
+    if (tab === "profile" && (review === "queue" || /^[1-9][0-9]{0,18}$/.test(review))) {
+        location.replace(reviewPageUrl(review === "queue" ? undefined : review));
+        return;
+    }
+    renderTab(tab);
 }
 
 for (const tab of Object.keys(tabTitles)) {

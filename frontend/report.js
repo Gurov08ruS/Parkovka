@@ -1,4 +1,5 @@
-import { request, requestMaxCameraAccess, requireAccount, showHistory } from "./app.js";
+import { requestMaxCameraAccess, requireAccount, showHistory } from "./app.js";
+import { request } from "./ui.js";
 
 const dialog = document.querySelector("#report-dialog");
 const form = document.querySelector("#report-form");
