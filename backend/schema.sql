@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS report_events (
     actor_id INTEGER NOT NULL REFERENCES accounts(id),
     status TEXT NOT NULL CHECK (status IN ('pending', 'under_review', 'approved', 'rejected')),
     note TEXT NOT NULL DEFAULT '',
+    account_ban INTEGER NOT NULL DEFAULT 0 CHECK (account_ban IN (0, 1)),
+    ban_report_id INTEGER REFERENCES reports(id) ON DELETE SET NULL,
     occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 

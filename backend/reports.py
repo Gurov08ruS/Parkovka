@@ -11,6 +11,7 @@ from database import open_database
 
 SCHEMA = Path(__file__).with_name("schema.sql")
 MAX_PHOTO_BYTES = 64 * 1024 * 1024
+BAN_REJECTION_NOTE = "Автоматически отклонено из-за блокировки аккаунта."
 CAPTURE_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 CAPTURE_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z")
 TRANSITIONS = {
@@ -21,8 +22,15 @@ REPORT_QUERY = """
     SELECT reports.id, reports.status, latitude, longitude, plate_number, plate_source, plate_verification,
            comment, created_at, submitted_at,
            address, captured_at, captures.report_id IS NOT NULL AS has_photo,
-           detail_photo IS NOT NULL AS has_detail_photo
+           detail_photo IS NOT NULL AS has_detail_photo,
+           COALESCE(ban_event.account_ban, 0) AS auto_rejected,
+           ban_event.ban_report_id
     FROM reports LEFT JOIN report_captures AS captures ON captures.report_id = reports.id
+    LEFT JOIN report_events AS ban_event ON ban_event.id = (
+        SELECT id FROM report_events
+        WHERE report_id = reports.id AND account_ban = 1
+        ORDER BY id DESC LIMIT 1
+    )
 """
 
 
@@ -63,12 +71,20 @@ def initialize_database(database):
                 "owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT",
                 "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT",
             }),
+            ("report_events", {
+                "account_ban": "INTEGER NOT NULL DEFAULT 0 CHECK (account_ban IN (0, 1))",
+                "ban_report_id": "INTEGER REFERENCES reports(id) ON DELETE SET NULL",
+            }),
         ):
             present = {column["name"] for column in connection.execute(f"PRAGMA table_info({table})")}
             for name, declaration in columns.items():
                 if name not in present:
                     connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
         connection.execute("CREATE INDEX IF NOT EXISTS reports_owner ON reports(owner_id, id)")
+        if connection.execute("PRAGMA user_version").fetchone()[0] < 2:
+            for ban in connection.execute("SELECT account_id, reviewer_id FROM account_bans WHERE active = 1"):
+                reject_banned_reports(connection, ban["account_id"], ban["reviewer_id"])
+            connection.execute("PRAGMA user_version = 2")
 
 
 def coordinates(data):
@@ -97,6 +113,7 @@ def report_json(row):
     report = dict(row)
     report["has_photo"] = bool(report["has_photo"])
     report["has_detail_photo"] = bool(report["has_detail_photo"])
+    report["auto_rejected"] = bool(report["auto_rejected"])
     return report
 
 
@@ -170,7 +187,8 @@ def submit_report(connection, data, owner_id):
 
 def report_scope(account, reviewer):
     if reviewer:
-        return ("reports.submitted_at IS NOT NULL AND reports.owner_id IN (SELECT id FROM accounts WHERE source = ?)",
+        return ("""(reports.submitted_at IS NOT NULL OR ban_event.id IS NOT NULL)
+                   AND reports.owner_id IN (SELECT id FROM accounts WHERE source = ?)""",
                 account["source"])
     return "reports.owner_id = ?", account["id"]
 
@@ -210,6 +228,21 @@ def report_detail(connection, identifier, account, reviewer):
     return report
 
 
+def reject_banned_reports(connection, author_id, reviewer_id, ban_report_id=None):
+    connection.execute(
+        """INSERT INTO report_events (report_id, actor_id, status, note, account_ban, ban_report_id)
+           SELECT reports.id, ?, 'rejected', ?, 1, ? FROM reports
+           WHERE reports.owner_id = ? AND NOT EXISTS (
+               SELECT 1 FROM report_events WHERE report_id = reports.id AND account_ban = 1
+           )""",
+        (reviewer_id, BAN_REJECTION_NOTE, ban_report_id, author_id),
+    )
+    connection.execute(
+        "UPDATE reports SET status = 'rejected' WHERE owner_id = ? AND status <> 'rejected'",
+        (author_id,),
+    )
+
+
 def set_author_ban(connection, identifier, account, data):
     banned = data.get("banned")
     if type(banned) is not bool:
@@ -231,6 +264,8 @@ def set_author_ban(connection, identifier, account, data):
            changed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
         (author_id, account["id"], banned, reason),
     )
+    if banned:
+        reject_banned_reports(connection, author_id, account["id"], identifier)
     return report_detail(connection, identifier, account, reviewer=True)
 
 

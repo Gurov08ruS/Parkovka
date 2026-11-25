@@ -297,7 +297,7 @@ function showProfile() {
         return;
     }
     if (user.reviewer) {
-        panelContent.append(button("Очередь проверки", () => showList(true), true));
+        panelContent.append(button("Очередь проверки", () => navigate("profile", "queue"), true));
     } else if (session.review_enabled) {
         const review = element("form", "", "panel-stack capture-section");
         const message = statusMessage();
@@ -309,7 +309,7 @@ function showProfile() {
         formHandler(review, message, "/api/reviewer", (data) => {
             review.reset();
             setSession(data);
-            if (activePanel(version)) showList(true);
+            if (activePanel(version)) navigate("profile", "queue");
         });
         panelContent.append(review);
     }
@@ -382,6 +382,17 @@ function reportStatus(report) {
     return element("span", statuses[report.status] || report.status, `report-status status-${report.status}`);
 }
 
+function appendBanNotice(container, report, reviewer) {
+    if (!report.auto_rejected) return;
+    const notice = element("p", "Автоматически отклонено из-за блокировки аккаунта.", "report-ban-notice");
+    if (reviewer && report.ban_report_id) {
+        const link = element("a", `Обращение №${report.ban_report_id}, из-за которого заблокировали аккаунт`);
+        link.href = tabUrl("profile", report.ban_report_id).href;
+        notice.append(" ", link);
+    }
+    container.append(notice);
+}
+
 async function showList(reviewer = false, filter = "sent") {
     const version = openPanel(reviewer ? "Очередь проверки" : "Мои обращения");
     const message = statusMessage("Загружаем обращения…");
@@ -398,7 +409,10 @@ async function showList(reviewer = false, filter = "sent") {
     try {
         const { reports } = await request(reviewer ? "/api/review" : "/api/reports");
         if (!activePanel(version)) return;
-        const visible = reviewer ? reports : reports.filter((report) => (report.status === "draft") === (filter === "drafts"));
+        const visible = reviewer ? reports : reports.filter((report) => {
+            const draft = report.status === "draft" || (report.auto_rejected && !report.submitted_at);
+            return draft === (filter === "drafts");
+        });
         if (visible.length === 0) {
             message.classList.add("empty-card");
             message.textContent = reviewer ? "В очереди пока нет обращений." : filter === "drafts"
@@ -411,6 +425,7 @@ async function showList(reviewer = false, filter = "sent") {
             const heading = element("div", "", "report-card-head");
             heading.append(element("strong", `Обращение №${report.id}`), reportStatus(report));
             card.append(heading, element("small", `${placeLabel(report)} · ${dateLabel(report.submitted_at || report.created_at)}`));
+            appendBanNotice(card, report, reviewer);
             if (report.plate_number) {
                 card.append(element("p", `Госномер: ${report.plate_number} · Не подтверждён`, "report-plate-summary"));
             }
@@ -425,7 +440,10 @@ async function showList(reviewer = false, filter = "sent") {
                 }
                 card.append(gallery);
             }
-            card.append(button("Подробнее об обращении", () => showDetails(report.id, reviewer, filter)));
+            card.append(button("Подробнее об обращении", () => {
+                if (reviewer) navigate("profile", report.id);
+                else showDetails(report.id, false, filter);
+            }));
             panelContent.append(card);
         }
     } catch (error) {
@@ -441,14 +459,18 @@ export function showHistory(identifier) {
 async function showDetails(identifier, reviewer = false, filter = "sent") {
     const version = openPanel(`Обращение №${identifier}`);
     const message = statusMessage("Загружаем обращение…");
-    panelContent.append(button("К списку", () => showList(reviewer, filter)), message);
+    panelContent.append(button("К списку", () => {
+        if (reviewer) navigate("profile", "queue");
+        else showList(false, filter);
+    }), message);
     const path = `${reviewer ? "/api/review" : "/api/reports"}/${identifier}`;
     try {
         const report = await request(path);
         if (!activePanel(version)) return;
         message.remove();
+        panelContent.append(reportStatus(report));
+        appendBanNotice(panelContent, report, reviewer);
         panelContent.append(
-            reportStatus(report),
             element("p", placeLabel(report)),
             element("p", `Создано ${dateLabel(report.created_at)}`),
         );
@@ -507,7 +529,10 @@ function showAuthorControls(report, path, version) {
     const form = element("form", "", "panel-stack");
     const message = statusMessage();
     if (!author.banned) {
-        form.append(field("Причина блокировки", "reason", { multiline: true, maxLength: 1000, required: true }));
+        form.append(
+            element("p", "При блокировке все обращения автора будут автоматически отклонены."),
+            field("Причина блокировки", "reason", { multiline: true, maxLength: 1000, required: true }),
+        );
     }
     const submit = submitButton(author.banned ? "Разблокировать аккаунт" : "Заблокировать аккаунт");
     form.append(submit, message);
@@ -606,9 +631,16 @@ function renderTab(tab, identifier, filter = "sent") {
     if (tab === "profile") {
         const version = panelVersion;
         request("/api/session").then((data) => {
-            if (activePanel(version)) { setSession(data); showProfile(); }
+            if (!activePanel(version)) return;
+            setSession(data);
+            if (data.user?.reviewer && identifier) {
+                if (identifier === "queue") showList(true);
+                else showDetails(identifier, true);
+            } else {
+                showProfile();
+            }
         }).catch((error) => {
-            if (activePanel(version)) showSessionError(panelContent, error, () => renderTab("profile"));
+            if (activePanel(version)) showSessionError(panelContent, error, () => renderTab("profile", identifier));
         });
         return;
     }
@@ -618,24 +650,37 @@ function renderTab(tab, identifier, filter = "sent") {
     });
 }
 
+function tabUrl(tab, identifier) {
+    const url = new URL(location.href);
+    if (tab === "home") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", tab);
+    if (tab === "profile" && identifier) url.searchParams.set("review", identifier);
+    else url.searchParams.delete("review");
+    return url;
+}
+
 function navigate(tab, identifier, filter) {
-    if (tab !== currentTab) {
-        const url = new URL(location.href);
-        if (tab === "home") url.searchParams.delete("tab");
-        else url.searchParams.set("tab", tab);
-        history.pushState(null, "", url);
-    }
+    const url = tabUrl(tab, identifier);
+    if (url.href !== location.href) history.pushState(null, "", url);
     renderTab(tab, identifier, filter);
+}
+
+function renderLocation() {
+    const tab = tabFromUrl();
+    const review = new URL(location.href).searchParams.get("review");
+    const identifier = tab === "profile" && (review === "queue" || /^[1-9][0-9]{0,18}$/.test(review))
+        ? review : undefined;
+    renderTab(tab, identifier);
 }
 
 for (const tab of Object.keys(tabTitles)) {
     $("open-" + tab).addEventListener("click", () => navigate(tab));
 }
-window.addEventListener("popstate", () => renderTab(tabFromUrl()));
+window.addEventListener("popstate", renderLocation);
 $("open-about").addEventListener("click", showAbout);
 $("home-reports").addEventListener("click", () => navigate("history"));
 $("header-profile")?.addEventListener("click", () => navigate("profile"));
 request("/api/session").then((data) => {
     if (session === null) setSession(data);
 }).catch(() => {});
-if (tabFromUrl() !== "home") renderTab(tabFromUrl());
+if (tabFromUrl() !== "home") renderLocation();

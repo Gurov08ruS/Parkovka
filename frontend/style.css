@@ -419,6 +419,8 @@ main {
 .status-pending { background: #FFF0B3; color: #684A00; }
 .status-approved { background: #D9EFDF; color: #245F39; }
 .status-rejected { background: #FCE2E5; color: #921C26; }
+.report-ban-notice { font-size: 14px; }
+.report-ban-notice a { color: var(--deep-blue); }
 
 .report-events {
 	display: grid;
