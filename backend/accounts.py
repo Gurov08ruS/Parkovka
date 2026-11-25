@@ -10,6 +10,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 
 COOKIE_NAME = "stukach_session"
+MAX_COOKIE_NAME = "__Host-stukach_max_session"
 SESSION_SECONDS = 8 * 60 * 60
 SIGNATURE_SECONDS = 60 * 60
 MAX_ID = re.compile(r"[1-9][0-9]{0,18}")
@@ -111,15 +112,21 @@ def verify_max(init_data, token):
     return fields, photo_url or None
 
 
-def cookie_token_hash(header):
+def cookie_token(header, source):
     try:
         cookie = SimpleCookie(header or "")
     except CookieError:
         return None
-    token = cookie.get(COOKIE_NAME)
-    if token is not None and len(token.value) == 43 and token.value.isascii():
-        return hashlib.sha256(token.value.encode()).hexdigest()
+    names = (MAX_COOKIE_NAME, COOKIE_NAME) if source == "max" else (COOKIE_NAME,)
+    for name in names:
+        token = cookie.get(name)
+        if token is not None and len(token.value) == 43 and token.value.isascii():
+            return token.value
     return None
+
+
+def session_token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest() if token else None
 
 
 def create_session(connection, source, max_id, old_token):
@@ -138,7 +145,7 @@ def create_session(connection, source, max_id, old_token):
     now = int(time.time())
     token = secrets.token_urlsafe(32)
     connection.execute("DELETE FROM sessions WHERE expires_at <= ? OR token_hash = ?", (now, old_token))
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    token_hash = session_token_hash(token)
     connection.execute(
         "INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)",
         (token_hash, account["id"], now + SESSION_SECONDS),

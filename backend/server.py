@@ -10,6 +10,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
 from contextlib import closing
 from functools import partial
 from http import HTTPStatus
@@ -20,8 +21,8 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from accounts import (
-    AccountBanned, COOKIE_NAME, SESSION_SECONDS, SessionProfiles, clean_text, cookie_token_hash, create_session, ensure_active,
-    session_account, user_fields, verify_max,
+    AccountBanned, COOKIE_NAME, MAX_COOKIE_NAME, SessionProfiles, clean_text, cookie_token, create_session,
+    ensure_active, session_account, session_token_hash, user_fields, verify_max,
 )
 from device_logs import create_device_logger, log_camera_error, log_location_error
 from max_bot import WEBHOOK_PATH, MaxApiError, MaxBot, webhook_url
@@ -187,20 +188,28 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
         return None
 
-    def session_cookie(self, token, max_age):
+    def session_cookie(self, token, max_age, *, legacy=False):
+        max_session = self.source == "max" and not legacy
+        name = MAX_COOKIE_NAME if max_session else COOKIE_NAME
         cookie = SimpleCookie()
-        cookie[COOKIE_NAME] = token
-        cookie[COOKIE_NAME]["path"] = "/"
-        cookie[COOKIE_NAME]["httponly"] = True
-        cookie[COOKIE_NAME]["samesite"] = "Lax"
-        cookie[COOKIE_NAME]["max-age"] = max_age
-        cookie[COOKIE_NAME]["secure"] = self.secure_cookie
-        return ("Set-Cookie", cookie[COOKIE_NAME].OutputString())
+        cookie[name] = token
+        entry = cookie[name]
+        entry["path"] = "/"
+        entry["httponly"] = True
+        entry["samesite"] = "None" if max_session else "Lax"
+        entry["max-age"] = max_age
+        entry["secure"] = max_session or self.secure_cookie
+        # SimpleCookie on older Python versions has no Partitioned attribute.
+        attributes = "; Partitioned" if max_session else ""
+        return ("Set-Cookie", entry.OutputString() + attributes)
+
+    def request_session_token(self):
+        return cookie_token(self.headers.get("Cookie"), self.source)
 
     def session_data(self, account, token_hash=None):
         user = None
         if account is not None:
-            token_hash = token_hash or cookie_token_hash(self.headers.get("Cookie"))
+            token_hash = token_hash or session_token_hash(self.request_session_token())
             profile = self.server.session_profiles.get(token_hash)
             first_name, last_name, photo_url = profile or ("", "", None)
             user = {
@@ -210,7 +219,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         return {"mode": self.source, "review_enabled": bool(self.reviewer_key), "user": user}
 
     def account(self, connection, *, required=True, reviewer=False):
-        current = session_account(connection, cookie_token_hash(self.headers.get("Cookie")), self.source)
+        current = session_account(connection, session_token_hash(self.request_session_token()), self.source)
         if current is None and required:
             raise ApiError(HTTPStatus.UNAUTHORIZED, "Войдите в приложение.")
         if current is not None:
@@ -339,7 +348,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.send_json(HTTPStatus.OK, {"ok": True})
 
     def post_api(self, path, status_route, ban_route, data, connection):
-        token_hash = cookie_token_hash(self.headers.get("Cookie"))
+        old_token = self.request_session_token()
+        token_hash = session_token_hash(old_token)
         if path == "/api/session":
             photo_url = None
             if self.bot_token:
@@ -353,11 +363,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             with connection:
                 token, account = create_session(connection, self.source, max_id, token_hash)
             profiles = self.server.session_profiles
-            headers = ()
             if token is not None:
                 profiles.remove(token_hash)
-                token_hash = hashlib.sha256(token.encode()).hexdigest()
-                headers = (self.session_cookie(token, SESSION_SECONDS),)
+                token_hash = session_token_hash(token)
+            headers = ()
+            if token is not None or self.source == "max":
+                max_age = max(0, account["expires_at"] - int(time.time()))
+                headers = (self.session_cookie(token or old_token, max_age),)
             profiles.put(token_hash, account["expires_at"], (first_name, last_name, photo_url))
             self.send_json(HTTPStatus.OK, self.session_data(account, token_hash), *headers)
             return
@@ -366,7 +378,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             with connection:
                 connection.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
             self.server.session_profiles.remove(token_hash)
-            self.send_json(HTTPStatus.OK, self.session_data(None), self.session_cookie("", 0))
+            headers = [self.session_cookie("", 0)]
+            if self.source == "max":
+                headers.append(self.session_cookie("", 0, legacy=True))
+            self.send_json(HTTPStatus.OK, self.session_data(None), *headers)
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None)
