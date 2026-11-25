@@ -1,5 +1,6 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
+	color-scheme: light dark;
 	--ink: #173F79;
 	--muted: #5E789F;
 	--paper: #F2FAFA;
@@ -962,6 +963,143 @@ main {
     .home-tile { min-height: 91px; }
     .tab-bar { width: calc(100% - 24px); }
     .panel-dialog { border-radius: 0; }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ink: #E0EDFB;
+        --muted: #A9BED6;
+        --paper: #121E2F;
+        --ice: #2D465F;
+        --sky: #385A7B;
+        --blue: #8DBFE9;
+        --strong-blue: #A2D5FB;
+        --deep-blue: #C7E4FF;
+        --heading: #B7DBFF;
+        --card-border: #304B66;
+        --page-edge: #0C1625;
+        --surface: #192B41;
+        --surface-hover: #233B54;
+        --field: #101C2C;
+        --glass-surface: linear-gradient(145deg, #263F58, #1B2D44);
+        --active-surface: linear-gradient(160deg, #2C4E70, #233B57);
+        --primary-surface: linear-gradient(105deg, #B5345C, #932B55);
+        --soft-shadow: 0 9px 24px rgb(0 0 0 / 26%);
+        --glass-shadow: inset 0 1px 0 rgb(165 209 247 / 16%), 0 3px 9px rgb(0 0 0 / 22%);
+    }
+
+    html { background: var(--page-edge); }
+    body {
+        background:
+            radial-gradient(ellipse at 12% 0%, rgb(76 135 190 / 24%), transparent 44%),
+            linear-gradient(145deg, var(--page-edge), var(--paper) 54%, var(--page-edge));
+    }
+
+    .app-brand { position: relative; isolation: isolate; }
+    .app-brand::before {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        left: 4px;
+        top: 50%;
+        transform: translateY(-45%);
+        width: 38px;
+        height: 40px;
+        border-radius: 11px;
+        background: #D3E9FD;
+    }
+
+    #header-profile, .profile-avatar, .achievement-icon { background: var(--glass-surface); }
+    #header-profile { border-color: var(--card-border); box-shadow: var(--glass-shadow); }
+    #header-profile:hover { background: var(--surface-hover); }
+
+    .hero {
+        border-color: var(--card-border);
+        background:
+            radial-gradient(circle at 88% 12%, rgb(115 173 226 / 22%), transparent 43%),
+            linear-gradient(145deg, #1D3651, #16283E);
+        box-shadow: var(--glass-shadow), var(--soft-shadow);
+    }
+    .hero-copy p, .tab-bar > * { color: var(--muted); }
+
+    .home-tile, .home-note, .steps,
+    .profile-card, .empty-card, .report-card, .capture-section, .tab-screen form,
+    .profile-menu .panel-button {
+        border-color: var(--card-border);
+        background: var(--surface);
+        box-shadow: var(--soft-shadow);
+    }
+    .home-note { background: #192B41C9; }
+    .home-tile:hover, .profile-menu .panel-button:hover { background: var(--surface-hover); }
+    .home-tile img { filter: brightness(1.22) saturate(.9); }
+    .achievement-card {
+        border-color: var(--card-border);
+        background: var(--glass-surface);
+        box-shadow: var(--soft-shadow);
+    }
+    .steps li + li { border-color: var(--ice); }
+    .steps li:nth-child(2) svg { background: #56314D; }
+
+    .tab-bar {
+        border-color: var(--card-border);
+        background: #142237F2;
+        box-shadow: var(--glass-shadow), var(--soft-shadow);
+    }
+    .tab-bar > :hover { background: var(--surface-hover); }
+    .tab-bar [aria-current], .tab-bar::before {
+        background: var(--active-surface);
+        box-shadow: var(--glass-shadow);
+    }
+    @media (prefers-reduced-motion: no-preference) {
+        .tab-bar [aria-current] { background: transparent; box-shadow: none; }
+    }
+
+    .panel-dialog {
+        border-color: var(--card-border);
+        background: linear-gradient(155deg, #1A2C43, var(--paper));
+        box-shadow: 0 20px 60px rgb(0 0 0 / 42%);
+    }
+    .panel-dialog::backdrop { background: rgb(5 10 19 / 66%); }
+    .panel-heading { border-color: var(--card-border); }
+
+    .panel-button, #report-form button {
+        border-color: var(--card-border);
+        background: var(--glass-surface);
+        box-shadow: var(--glass-shadow);
+    }
+    .panel-button:hover, #report-form button:hover:not(:disabled) { box-shadow: var(--soft-shadow); }
+    .report-button, .primary-button, #report-form button[type="submit"], #report-form .primary-button {
+        background: var(--primary-surface);
+    }
+
+    :is(.panel-dialog, .tab-screen) :is(input, textarea, select), .plate-input {
+        border-color: var(--card-border);
+        background: var(--field);
+    }
+    :is(.panel-dialog, .tab-screen) :is(input, textarea)::placeholder { color: var(--muted); }
+    :is(.panel-dialog, .tab-screen) :is(input, textarea, select):focus {
+        border-color: var(--blue);
+        outline-color: rgb(141 191 233 / 30%);
+    }
+    .photo-box {
+        border-color: #5682A8;
+        background: linear-gradient(145deg, #1E354F, #182A40);
+    }
+    .step-progress { background: var(--ice); }
+    .step-progress span { background: linear-gradient(90deg, #6A9DCE, var(--strong-blue)); }
+
+    .report-status { background: #253D55; }
+    .status-pending, .report-plate-summary span { background: #49351F; color: #FFDA9C; }
+    .status-approved { background: #1B3A34; color: #A5E9C3; }
+    .status-rejected { background: #4B2B41; color: #FFB7CC; }
+}
+
+@media (prefers-color-scheme: dark) and (min-width: 600px) {
+    main {
+        border-color: var(--card-border);
+        background: #121E2FD6;
+        box-shadow: var(--soft-shadow);
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
