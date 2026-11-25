@@ -40,7 +40,7 @@ except ModuleNotFoundError as error:
         ".venv/bin/pip install -r requirements.txt"
     ) from None
 
-from database import ensure_key, migrate_plaintext, sqlite3
+from database import DatabaseKeyError, migrate_plaintext, sqlite3
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
@@ -218,7 +218,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_error(error.status, str(error))
         except AccountBanned as error:
             self.send_error(HTTPStatus.FORBIDDEN, str(error))
-        except sqlite3.Error:
+        except (DatabaseKeyError, sqlite3.Error):
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
 
     def get_api(self, path, connection):
@@ -272,10 +272,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.FORBIDDEN, str(error))
         except (UnicodeError, json.JSONDecodeError, RecursionError):
             self.send_error(HTTPStatus.BAD_REQUEST, "Некорректный JSON в кодировке UTF-8.")
+        except (DatabaseKeyError, sqlite3.Error):
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
         except ValueError as error:
             self.send_error(HTTPStatus.BAD_REQUEST, str(error))
-        except sqlite3.Error:
-            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
 
     def post_api(self, path, status_route, ban_route, data, connection):
         token_hash = cookie_token_hash(self.headers.get("Cookie"))
@@ -389,15 +389,16 @@ def main():
     if not bot_token and not reviewer_key:
         reviewer_key = generated_key = secrets.token_urlsafe(18)
 
-    options.db.parent.mkdir(parents=True, exist_ok=True)
     source = options.migrate_from
     if source is None and options.db == DEFAULT_DATABASE and not options.db.exists() and LEGACY_DATABASE.exists():
         source = LEGACY_DATABASE
-    if source is not None:
-        migrate_plaintext(source, options.db)
-        print(f"Зашифрованная копия создана: {options.db}", flush=True)
-    ensure_key(options.db)
-    initialize_database(options.db)
+    try:
+        if source is not None:
+            migrate_plaintext(source, options.db)
+            print(f"Зашифрованная копия создана: {options.db}", flush=True)
+        initialize_database(options.db)
+    except (OSError, ValueError, sqlite3.Error) as error:
+        raise SystemExit(f"Не удалось открыть базу {options.db}: {error}") from None
     handler = partial(
         AppHandler, database=options.db, bot_token=bot_token, reviewer_key=reviewer_key,
         secure_cookie=tls is not None or bool(bot_token),

@@ -3,7 +3,7 @@ import re
 import secrets
 import sqlite3 as plaintext_sqlite
 import tempfile
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 from sqlcipher3 import dbapi2 as sqlite3
@@ -12,37 +12,90 @@ from sqlcipher3 import dbapi2 as sqlite3
 KEY_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
+class DatabaseKeyError(ValueError):
+    pass
+
+
 def key_path(database):
     return database.with_suffix(database.suffix + ".key")
 
 
-def read_key(database):
-    value = key_path(database).read_text(encoding="ascii").strip()
-    if not KEY_PATTERN.fullmatch(value):
-        raise ValueError("Ключ базы должен содержать 64 строчные шестнадцатеричные цифры.")
+def decode_key(raw):
+    encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+    try:
+        value = raw.decode(encoding).strip()
+    except UnicodeError:
+        raise DatabaseKeyError("Не удалось прочитать кодировку ключа базы.") from None
+    if value and not KEY_PATTERN.fullmatch(value):
+        raise DatabaseKeyError("Ключ базы должен содержать 64 строчные шестнадцатеричные цифры.")
     return value
 
 
-def ensure_key(database):
+def read_key(database):
     path = key_path(database)
-    if path.exists():
-        return read_key(database)
-    if database.exists():
-        raise ValueError(f"Не найден ключ существующей базы: {path}")
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
+        value = decode_key(path.read_bytes())
+    except FileNotFoundError:
+        raise DatabaseKeyError(f"Не найден ключ базы: {path}") from None
+    if not value:
+        raise DatabaseKeyError(f"Файл ключа базы пуст: {path}")
+    return value
+
+
+def database_has_data(database):
+    try:
+        return database.stat().st_size > 0
+    except FileNotFoundError:
+        return False
+
+
+@contextmanager
+def locked_key_file(path):
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0)
+    with os.fdopen(os.open(path, flags, 0o600), "r+b", buffering=0) as key_file:
+        descriptor = key_file.fileno()
+        if os.name == "nt":
+            import msvcrt
+
+            # Lock beyond the key so readers of an existing key can still open it.
+            lock_offset = 4096
+            key_file.seek(lock_offset)
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+            key_file.seek(0)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            yield key_file
+        finally:
+            if os.name == "nt":
+                key_file.seek(lock_offset)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+
+
+def ensure_key(database):
+    if database_has_data(database):
         return read_key(database)
-    with os.fdopen(descriptor, "w", encoding="ascii") as key_file:
-        key_file.write(secrets.token_hex(32) + "\n")
-        key_file.flush()
+    path = key_path(database)
+    with locked_key_file(path) as key_file:
+        value = decode_key(key_file.read())
+        if value:
+            return value
+        if database_has_data(database):
+            raise DatabaseKeyError(f"Нет ключа для существующей базы: {path}")
+        value = secrets.token_hex(32)
+        key_file.seek(0)
+        key_file.write((value + "\n").encode("ascii"))
+        key_file.truncate()
         os.fsync(key_file.fileno())
-    return read_key(database)
+        return value
 
 
-def open_database(database):
+def open_database(database, *, create=False):
     key = read_key(database)
-    connection = sqlite3.connect(str(database))
+    mode = "rwc" if create else "rw"
+    connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode={mode}", uri=True)
     try:
         connection.execute(f'''PRAGMA key = "x'{key}'"''')
         if not connection.execute("PRAGMA cipher_version").fetchone():

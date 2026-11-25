@@ -6,7 +6,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from accounts import clean_text, ensure_active
-from database import open_database
+from database import ensure_key, open_database
 
 
 SCHEMA = Path(__file__).with_name("schema.sql")
@@ -42,7 +42,8 @@ class ApiError(Exception):
 
 def initialize_database(database):
     database.parent.mkdir(parents=True, exist_ok=True)
-    with closing(open_database(database)) as connection, connection:
+    ensure_key(database)
+    with closing(open_database(database, create=True)) as connection, connection:
         connection.executescript(SCHEMA.read_text(encoding="utf-8"))
         connection.execute("BEGIN IMMEDIATE")
         if connection.execute("PRAGMA user_version").fetchone()[0] < 1:
