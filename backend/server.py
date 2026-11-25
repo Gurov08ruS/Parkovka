@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import ssl
 import subprocess
 import sys
@@ -26,21 +27,20 @@ from device_logs import create_device_logger, log_camera_error, log_location_err
 
 try:
     import sqlcipher3
-except ModuleNotFoundError as error:
-    if error.name != "sqlcipher3":
-        raise
+except ImportError as error:
     project = Path(__file__).resolve().parent.parent
     environment = project / ".venv"
     interpreter = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if interpreter.is_file() and Path(sys.prefix).resolve() != environment.resolve():
-        os.execv(str(interpreter), [str(interpreter), str(Path(__file__).resolve()), *sys.argv[1:]])
-    raise SystemExit(
-        "Не установлен SQLCipher. Выполните из папки проекта:\n"
-        "python3 -m venv .venv\n"
-        ".venv/bin/pip install -r requirements.txt"
-    ) from None
+        command = [str(interpreter), str(Path(__file__).resolve()), *sys.argv[1:]]
+        if os.name == "nt":
+            raise SystemExit(subprocess.call(command)) from None
+        os.execv(command[0], command)
+    setup = ("Запустите start-windows.cmd из папки проекта." if os.name == "nt"
+             else "Установите зависимости: python3 -m pip install -r requirements.txt")
+    raise SystemExit(f"Не удалось загрузить SQLCipher: {error}\n{setup}") from None
 
-from database import DatabaseKeyError, migrate_plaintext, sqlite3
+from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
@@ -64,6 +64,8 @@ FRONTEND = Path(__file__).parent.parent / "frontend"
 
 
 def port_owners(port):
+    if os.name == "nt":
+        return []
     try:
         result = subprocess.run(
             ["lsof", "-nP", "-Fpc", f"-iTCP:{port}", "-sTCP:LISTEN"],
@@ -104,7 +106,30 @@ def reverse_geocode(latitude, longitude):
     )))
 
 
+class AppServer(ThreadingHTTPServer):
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+    def handle_error(self, request, client_address):
+        if not isinstance(sys.exc_info()[1], (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+            super().handle_error(request, client_address)
+
+
 class AppHandler(SimpleHTTPRequestHandler):
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }
+
     def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, device_logs, **kwargs):
         self.database = database
         self.device_logs = device_logs
@@ -116,7 +141,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=FRONTEND, **kwargs)
 
     def end_headers(self):
-        path = self.path.partition("?")[0]
+        path = getattr(self, "path", "").partition("?")[0]
         if path == "/" or path.endswith((".html", ".js", ".css")):
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
@@ -390,9 +415,10 @@ def main():
         reviewer_key = generated_key = secrets.token_urlsafe(18)
 
     source = options.migrate_from
-    if source is None and options.db == DEFAULT_DATABASE and not options.db.exists() and LEGACY_DATABASE.exists():
-        source = LEGACY_DATABASE
     try:
+        if (source is None and options.db == DEFAULT_DATABASE and not options.db.exists()
+                and database_has_data(LEGACY_DATABASE)):
+            source = LEGACY_DATABASE
         if source is not None:
             migrate_plaintext(source, options.db)
             print(f"Зашифрованная копия создана: {options.db}", flush=True)
@@ -408,10 +434,11 @@ def main():
         },
     )
     try:
-        server = ThreadingHTTPServer((options.host, options.port), handler)
+        server = AppServer((options.host, options.port), handler)
     except OSError as error:
-        if error.errno != errno.EADDRINUSE:
-            raise
+        if error.errno != errno.EADDRINUSE and getattr(error, "winerror", None) != 10048:
+            raise SystemExit(f"Не удалось слушать {options.host}:{options.port}: {error}\n"
+                             "Проверьте адрес или укажите свободный порт через --port.") from None
         owners = port_owners(options.port)
         detail = f"\nЗанимают порт: {', '.join(owners)}." if owners else "\nНе удалось определить процесс."
         raise SystemExit(
@@ -423,7 +450,8 @@ def main():
         if tls is not None:
             server.socket = tls.wrap_socket(server.socket, server_side=True)
         scheme = "https" if tls is not None else "http"
-        print(f"Сайт и API: {scheme}://{options.host}:{server.server_port}/", flush=True)
+        browser_host = "127.0.0.1" if options.host in ("", "0.0.0.0") else options.host
+        print(f"Сайт и API: {scheme}://{browser_host}:{server.server_port}/", flush=True)
         if generated_key:
             print(f"Тестовый секрет проверяющего: {generated_key}", flush=True)
         try:

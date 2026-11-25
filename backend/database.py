@@ -37,6 +37,8 @@ def read_key(database):
         value = decode_key(path.read_bytes())
     except FileNotFoundError:
         raise DatabaseKeyError(f"Не найден ключ базы: {path}") from None
+    except OSError as error:
+        raise DatabaseKeyError(f"Не удалось прочитать ключ базы: {path}: {error.strerror}") from None
     if not value:
         raise DatabaseKeyError(f"Файл ключа базы пуст: {path}")
     return value
@@ -140,6 +142,10 @@ def migrate_plaintext(source, destination):
             pass
         else:
             raise ValueError("Проверка шифрования не пройдена.")
-        os.link(temporary, destination)
+        if os.name == "nt":
+            # Windows rename fails if the destination already exists.
+            temporary.rename(destination)
+        else:
+            os.link(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)
