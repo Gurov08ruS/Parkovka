@@ -509,7 +509,10 @@ def main():
 
     database_directory = options.db.resolve().parent
     default_directory = database_directory == DEFAULT_DATABASE.parent.resolve()
-    log_directory = (FRONTEND.parent if default_directory else database_directory) / "logs"
+    if os.name == "nt":
+        log_directory = Path.cwd() / "logs"
+    else:
+        log_directory = (FRONTEND.parent if default_directory else database_directory) / "logs"
     try:
         logs = ServerLogs(log_directory)
     except OSError as error:
