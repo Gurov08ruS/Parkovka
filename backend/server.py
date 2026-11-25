@@ -114,6 +114,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.source = "max" if self.bot_token else "test"
         super().__init__(*args, directory=FRONTEND, **kwargs)
 
+    def end_headers(self):
+        path = self.path.partition("?")[0]
+        if path == "/" or path.endswith((".html", ".js", ".css")):
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def send_data(self, status, body, content_type, headers=()):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -195,6 +201,10 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.path.partition("?")[0]
         if path != "/api" and not path.startswith("/api/"):
+            # Always revalidate the page and its modules as a single current UI.
+            if path == "/" or path.endswith((".html", ".js", ".css")):
+                if "If-Modified-Since" in self.headers:
+                    del self.headers["If-Modified-Since"]
             super().do_GET()
             return
         if path == "/api/health":

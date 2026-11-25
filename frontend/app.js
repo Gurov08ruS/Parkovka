@@ -69,18 +69,7 @@ function initData() {
 
 function setSession(data) {
     session = data;
-    const avatar = $("header-profile").querySelector("img");
-    const icon = $("header-profile").querySelector("svg");
-    avatar.onload = null;
-    avatar.onerror = null;
-    avatar.hidden = true;
-    icon.hidden = false;
-    avatar.removeAttribute("src");
-    if (data.user?.photo_url) {
-        avatar.onload = () => { avatar.hidden = false; icon.hidden = true; };
-        avatar.onerror = () => { avatar.hidden = true; icon.hidden = false; };
-        avatar.src = data.user.photo_url;
-    }
+    updateHeaderAvatar(data.user);
     if (data.mode === "max" && initData() && !bridge) {
         bridge = new Promise((resolve) => {
             if (window.WebApp) {
@@ -93,6 +82,23 @@ function setSession(data) {
             script.onerror = () => resolve(null);
             document.head.append(script);
         });
+    }
+}
+
+function updateHeaderAvatar(user) {
+    const header = $("header-profile");
+    const avatar = header?.querySelector("img");
+    const icon = header?.querySelector("svg");
+    if (!avatar || !icon) return;
+    avatar.onload = null;
+    avatar.onerror = null;
+    avatar.hidden = true;
+    icon.hidden = false;
+    avatar.removeAttribute("src");
+    if (user?.photo_url) {
+        avatar.onload = () => { avatar.hidden = false; icon.hidden = true; };
+        avatar.onerror = () => { avatar.hidden = true; icon.hidden = false; };
+        avatar.src = user.photo_url;
     }
 }
 
@@ -278,11 +284,11 @@ function showProfile() {
     identity.append(avatar, text);
     panelContent.append(identity);
     const menu = element("div", "", "profile-menu");
-    if (user) menu.append(button("Личные данные  ›", showEditProfile));
+    if (user) menu.append(button("Личные данные", showEditProfile));
     menu.append(
-        button("Мои достижения  ›", () => navigate("achievements")),
-        button("Черновики  ›", () => navigate("history", null, "drafts")),
-        button("О проекте  ›", showAbout),
+        button("Мои достижения", () => navigate("achievements")),
+        button("Черновики", () => navigate("history", null, "drafts")),
+        button("О проекте", showAbout),
     );
     panelContent.append(menu);
 
@@ -628,7 +634,7 @@ for (const tab of Object.keys(tabTitles)) {
 window.addEventListener("popstate", () => renderTab(tabFromUrl()));
 $("open-about").addEventListener("click", showAbout);
 $("home-reports").addEventListener("click", () => navigate("history"));
-$("header-profile").addEventListener("click", () => navigate("profile"));
+$("header-profile")?.addEventListener("click", () => navigate("profile"));
 request("/api/session").then((data) => {
     if (session === null) setSession(data);
 }).catch(() => {});
