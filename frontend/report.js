@@ -6,6 +6,7 @@ const form = document.querySelector("#report-form");
 const locateButton = document.querySelector("#locate");
 const cameraButton = document.querySelector("#open-camera");
 const cameraSettingsButton = document.querySelector("#camera-settings");
+const browserCameraLink = document.querySelector("#open-browser-camera");
 const detailButton = document.querySelector("#open-detail");
 const removeDetail = document.querySelector("#remove-detail");
 const takeButton = document.querySelector("#take-photo");
@@ -84,12 +85,15 @@ let locating = false;
 let openingCamera = false;
 let saving = false;
 let openCameraSettings;
+let browserCameraGeneration = 0;
+
+function maxPlatform() {
+    return window.WebApp?.platform || new URLSearchParams(location.hash.slice(1)).get("WebAppPlatform") || "unknown";
+}
 
 function deviceFailure(device, stage, code, details = {}) {
     const inMax = Boolean(initData());
-    const platform = inMax
-        ? window.WebApp?.platform || new URLSearchParams(location.hash.slice(1)).get("WebAppPlatform") || "unknown"
-        : "browser";
+    const platform = inMax ? maxPlatform() : "browser";
     const event = { stage, code, secure_context: Boolean(window.isSecureContext), in_max: inMax, platform, ...details };
     console.warn("Ошибка устройства", device, event);
     void request(`/api/diagnostics/${device}`, event, { keepalive: true }).catch(() => {
@@ -103,6 +107,40 @@ function cameraFailure(stage, code, message, { settings = code, ...details } = {
     openCameraSettings = maxCameraSettings(settings);
     cameraSettingsButton.hidden = !openCameraSettings;
     deviceFailure("camera", stage, code, { photo: photoKind, ...details });
+    const cameraBlocked = (stage === "stream" && ["NotAllowedError", "SecurityError"].includes(code))
+        || (stage === "context" && ["policy_blocked", "api_unavailable"].includes(code));
+    if (cameraBlocked && initData() && (maxPlatform() === "android" || /Android/i.test(navigator.userAgent))) {
+        void prepareBrowserCamera();
+    }
+}
+
+function hideBrowserCamera() {
+    browserCameraGeneration += 1;
+    browserCameraLink.hidden = true;
+    browserCameraLink.removeAttribute("href");
+}
+
+async function prepareBrowserCamera() {
+    const generation = ++browserCameraGeneration;
+    try {
+        await flushDraft();
+        if (generation !== browserCameraGeneration || submittedId !== null) return;
+        const { ticket } = await request("/api/camera/handoff", { init_data: initData() });
+        if (generation !== browserCameraGeneration || submittedId !== null) return;
+        const destination = new URL("/", location.origin);
+        if (photo) {
+            destination.searchParams.set("tab", "history");
+            destination.searchParams.set("filter", "drafts");
+        }
+        destination.hash = new URLSearchParams({ camera_ticket: ticket }).toString();
+        browserCameraLink.href = destination.href;
+        browserCameraLink.hidden = false;
+        cameraStatus.textContent = "Камера недоступна в MAX. Продолжите съёмку в браузере";
+    } catch (error) {
+        if (generation === browserCameraGeneration) {
+            cameraStatus.textContent = `Не удалось подготовить переход в браузер. ${error.message}`;
+        }
+    }
 }
 
 function updateButtons() {
@@ -189,6 +227,7 @@ function resetReport() {
 }
 
 function showStep(value) {
+    hideBrowserCamera();
     step = value;
     photoStep.hidden = step === 3;
     reviewStep.hidden = step !== 3;
@@ -308,6 +347,7 @@ async function getCameraStream(video) {
 }
 
 async function openCamera(kind) {
+    hideBrowserCamera();
     photoKind = kind;
     openCameraSettings = undefined;
     cameraSettingsButton.hidden = true;
@@ -783,6 +823,15 @@ cameraSettingsButton.addEventListener("click", async () => {
     } catch {
         deviceFailure("camera", "max_permissions", "MaxSettingsError", { photo: photoKind });
         cameraStatus.textContent = "Не удалось открыть настройки. Проверьте разрешения MAX в настройках телефона";
+    }
+});
+browserCameraLink.addEventListener("click", (event) => {
+    if (browserCameraLink.hidden || typeof window.WebApp?.openLink !== "function") return;
+    try {
+        window.WebApp.openLink(browserCameraLink.href);
+        event.preventDefault();
+    } catch {
+        // Let the link open normally if the bridge rejects the call.
     }
 });
 nextStep.addEventListener("click", () => showStep(step + 1));

@@ -53,7 +53,7 @@ except ImportError as error:
 
 from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
 from reports import (
-    MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft,
+    MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft, delete_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
     reviewer_decision_stats, save_capture, set_author_ban, withdraw_report,
 )
@@ -68,6 +68,8 @@ REPORT_ROUTE = re.compile(r"/api/(reports|review)/([1-9][0-9]{0,18})(?:/photos/(
 STATUS_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/status")
 BAN_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/author-ban")
 WITHDRAW_ROUTE = re.compile(r"/api/reports/([1-9][0-9]{0,18})/withdraw")
+DELETE_DRAFT_ROUTE = re.compile(r"/api/reports/([1-9][0-9]{0,18})/delete-draft")
+CAMERA_TICKET = re.compile(r"[A-Za-z0-9_-]{43}")
 DEVICE_DIAGNOSTICS = {
     "/api/diagnostics/camera": ("camera", log_camera_error),
     "/api/diagnostics/location": ("location", log_location_error),
@@ -80,6 +82,18 @@ PHOTON_URL = os.environ.get("STUKACH_PHOTON_URL", "https://photon.komoot.io").rs
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "stukach.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "stukach.sqlite3"
 FRONTEND = Path(__file__).parent.parent / "frontend"
+
+
+def app_version():
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(FRONTEND.parent), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    version = result.stdout.strip()
+    return version if re.fullmatch(r"[0-9a-f]{7,40}", version) else None
 
 
 def port_owners(port):
@@ -132,6 +146,8 @@ class AppServer(ThreadingHTTPServer):
         self.logs = logs
         self.session_profiles = SessionProfiles()
         self.max_profiles = SessionProfiles()
+        self.camera_handoffs = SessionProfiles(limit=1024)
+        self.version = app_version()
         super().__init__(*args, **kwargs)
 
     def server_bind(self):
@@ -283,6 +299,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         if path == "/api/health":
             self.send_json(HTTPStatus.OK, {"status": "ok"})
             return
+        if path == "/api/version":
+            self.send_json(HTTPStatus.OK, {
+                "version": self.server.version, "bot": self.max_bot is not None, "test": self.source == "test",
+            })
+            return
         try:
             with closing(open_database(self.database)) as connection:
                 self.get_api(path, connection)
@@ -341,11 +362,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         status_route = STATUS_ROUTE.fullmatch(path)
         ban_route = BAN_ROUTE.fullmatch(path)
         withdraw_route = WITHDRAW_ROUTE.fullmatch(path)
+        delete_draft_route = DELETE_DRAFT_ROUTE.fullmatch(path)
         diagnostic = DEVICE_DIAGNOSTICS.get(path)
         if path not in {
-            "/api/session", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
+            "/api/session", "/api/session/camera", "/api/camera/handoff", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
             REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH,
-        } and not (status_route or ban_route or withdraw_route or diagnostic):
+        } and not (status_route or ban_route or withdraw_route or delete_draft_route or diagnostic):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
@@ -360,7 +382,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH) else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
-                self.post_api(path, status_route, ban_route, withdraw_route, data, connection)
+                self.post_api(path, status_route, ban_route, withdraw_route, delete_draft_route, data, connection)
         except ApiError as error:
             self.send_error(error.status, str(error))
         except AccountBanned as error:
@@ -383,9 +405,23 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.max_bot.handle_update(self.read_json(MAX_WEBHOOK_BODY_BYTES))
         self.send_json(HTTPStatus.OK, {"ok": True})
 
-    def post_api(self, path, status_route, ban_route, withdraw_route, data, connection):
+    def post_api(self, path, status_route, ban_route, withdraw_route, delete_draft_route, data, connection):
         old_token = self.request_session_token()
         token_hash = session_token_hash(old_token)
+        if path == "/api/session/camera":
+            ticket = data.get("ticket")
+            if self.source != "max" or not isinstance(ticket, str) or not CAMERA_TICKET.fullmatch(ticket):
+                raise ApiError(HTTPStatus.UNAUTHORIZED, "Откройте камеру заново из мини-приложения MAX.")
+            origin_session = self.server.camera_handoffs.take(session_token_hash(ticket))
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                original = session_account(connection, origin_session, "max")
+                if original is None:
+                    raise ApiError(HTTPStatus.UNAUTHORIZED, "Ссылка на камеру истекла или уже использована. Откройте её заново в MAX.")
+                token, account = create_session(connection, "max", original["max_id"], None)
+            max_age = max(0, account["expires_at"] - int(time.time()))
+            self.send_json(HTTPStatus.OK, self.session_data(account), self.session_cookie(token, max_age))
+            return
         if path == "/api/session":
             profile = None
             max_id = None
@@ -425,6 +461,19 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None)
+        if path == "/api/camera/handoff":
+            if self.source != "max" or not self.bot_token:
+                raise ApiError(HTTPStatus.FORBIDDEN, "Этот переход доступен из мини-приложения MAX.")
+            try:
+                max_id, _, _ = verify_max(data.get("init_data"), self.bot_token)
+            except ValueError as error:
+                raise ApiError(HTTPStatus.UNAUTHORIZED, "Откройте мини-приложение MAX заново и повторите попытку.") from error
+            if max_id != account["max_id"]:
+                raise ApiError(HTTPStatus.FORBIDDEN, "Откройте камеру из аккаунта, в котором вы вошли в MAX.")
+            ticket = secrets.token_urlsafe(32)
+            self.server.camera_handoffs.put(session_token_hash(ticket), time.time() + 120, token_hash)
+            self.send_json(HTTPStatus.OK, {"ticket": ticket})
+            return
         if path == "/api/profile":
             if self.source == "max":
                 raise ApiError(HTTPStatus.FORBIDDEN, "Имя, фамилия и фото берутся из профиля MAX.")
@@ -458,8 +507,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"address": address})
             return
 
-        if status_route or ban_route or withdraw_route:
-            identifier = int((status_route or ban_route or withdraw_route)[1])
+        if status_route or ban_route or withdraw_route or delete_draft_route:
+            identifier = int((status_route or ban_route or withdraw_route or delete_draft_route)[1])
             if identifier > MAX_REPORT_ID:
                 raise ApiError(HTTPStatus.NOT_FOUND, "Обращение не найдено.")
             with connection:
@@ -467,8 +516,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                     report = change_status(connection, identifier, account, data)
                 elif ban_route:
                     report = set_author_ban(connection, identifier, account, data)
-                else:
+                elif withdraw_route:
                     report = withdraw_report(connection, identifier, account)
+                else:
+                    report = delete_draft(connection, identifier, account)
             self.send_json(HTTPStatus.OK, report)
             return
 

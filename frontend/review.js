@@ -1,4 +1,4 @@
-import { request, initData, needsMax, loadSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
+import { request, initData, needsMax, loadSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink, showSiteVersion } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses } from "./report-view.js";
 
 const content = document.getElementById("review-content");
@@ -188,3 +188,4 @@ async function loadPage() {
 }
 
 loadPage();
+void showSiteVersion(document.getElementById("site-version"));

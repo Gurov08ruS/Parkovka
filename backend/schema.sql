@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS reports (
     owner_id INTEGER REFERENCES accounts(id),
     submitted_at TEXT,
     withdrawn_at TEXT,
+    deleted_at TEXT,
+    deleted_capture_id TEXT,
     CHECK ((latitude IS NULL) = (longitude IS NULL))
 );
 

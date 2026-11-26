@@ -206,8 +206,9 @@ main {
 .report-card-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .report-filter { display: flex; gap: 8px; }
 .report-filter button { flex: 1; }
-.withdraw-report summary { width: fit-content; padding: 10px 14px; border: 1px solid var(--card-border); border-radius: 14px; background: var(--glass-surface); cursor: pointer; }
-.withdraw-report form { margin-top: 8px; }
+.report-confirmation summary { width: fit-content; padding: 10px 14px; border: 1px solid var(--card-border); border-radius: 14px; background: var(--glass-surface); cursor: pointer; }
+.report-confirmation form { margin-top: 8px; }
+.site-version { margin-top: 16px; text-align: center; font-size: 12px; color: #667085; color: light-dark(#667085, #a9b3c2); }
 .empty-card { text-align: center; }
 .decision-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 8px; max-width: 360px; }
 .decision-stats div { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--ice); border-radius: 12px; }

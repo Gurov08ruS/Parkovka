@@ -71,6 +71,7 @@ def initialize_database(database):
             ("reports", {
                 "owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT",
                 "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT", "withdrawn_at": "TEXT",
+                "deleted_at": "TEXT", "deleted_capture_id": "TEXT",
             }),
             ("report_events", {
                 "account_ban": "INTEGER NOT NULL DEFAULT 0 CHECK (account_ban IN (0, 1))",
@@ -82,6 +83,7 @@ def initialize_database(database):
                 if name not in present:
                     connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
         connection.execute("CREATE INDEX IF NOT EXISTS reports_owner ON reports(owner_id, id)")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS reports_deleted_capture ON reports(deleted_capture_id) WHERE deleted_capture_id IS NOT NULL")
         if connection.execute("PRAGMA user_version").fetchone()[0] < 2:
             for ban in connection.execute("SELECT account_id, reviewer_id FROM account_bans WHERE active = 1"):
                 reject_banned_reports(connection, ban["account_id"], ban["reviewer_id"])
@@ -166,6 +168,8 @@ def save_capture(connection, data, owner_id, *, draft=False):
 
     connection.execute("BEGIN IMMEDIATE")
     ensure_active(connection, owner_id)
+    if connection.execute("SELECT 1 FROM reports WHERE deleted_capture_id = ?", (capture_id,)).fetchone():
+        raise ApiError(HTTPStatus.GONE, "Этот черновик уже удалён.")
     previous = connection.execute(
         """SELECT report_id, owner_id, status, submitted_at
            FROM report_captures JOIN reports ON reports.id = report_id WHERE capture_id = ?""",
@@ -209,10 +213,10 @@ def save_capture(connection, data, owner_id, *, draft=False):
 def report_scope(account, reviewer):
     if reviewer:
         return ("""(reports.submitted_at IS NOT NULL OR ban_event.id IS NOT NULL)
-                   AND reports.withdrawn_at IS NULL
+                   AND reports.withdrawn_at IS NULL AND reports.deleted_at IS NULL
                    AND reports.owner_id IN (SELECT id FROM accounts WHERE source = ?)""",
                 account["source"])
-    return "reports.owner_id = ?", account["id"]
+    return "reports.owner_id = ? AND reports.deleted_at IS NULL", account["id"]
 
 
 def account_report_stats(connection, account_id):
@@ -220,7 +224,7 @@ def account_report_stats(connection, account_id):
         """SELECT COUNT(*) FILTER (WHERE status = 'approved' AND withdrawn_at IS NULL) AS approved,
                   COUNT(*) FILTER (WHERE status = 'rejected' AND withdrawn_at IS NULL) AS rejected,
                   COUNT(withdrawn_at) AS withdrawn
-           FROM reports WHERE owner_id = ?""",
+           FROM reports WHERE owner_id = ? AND deleted_at IS NULL""",
         (account_id,),
     ).fetchone())
 
@@ -291,17 +295,41 @@ def withdraw_report(connection, identifier, account):
     return report_detail(connection, identifier, account, reviewer=False)
 
 
+def delete_draft(connection, identifier, account):
+    connection.execute("BEGIN IMMEDIATE")
+    ensure_active(connection, account["id"])
+    report = connection.execute(
+        "SELECT status, submitted_at, deleted_at FROM reports WHERE id = ? AND owner_id = ?",
+        (identifier, account["id"]),
+    ).fetchone()
+    if report is None:
+        raise ApiError(HTTPStatus.NOT_FOUND, "Черновик не найден.")
+    if report["submitted_at"] is not None or report["status"] != "draft":
+        raise ApiError(HTTPStatus.CONFLICT, "Можно удалить только неотправленный черновик.")
+    if report["deleted_at"] is None:
+        connection.execute(
+            """UPDATE reports SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                   deleted_capture_id = (SELECT capture_id FROM report_captures WHERE report_id = reports.id),
+                   latitude = NULL, longitude = NULL, comment = '', plate_number = NULL,
+                   plate_source = NULL, plate_verification = NULL WHERE id = ?""",
+            (identifier,),
+        )
+        connection.execute("DELETE FROM report_captures WHERE report_id = ?", (identifier,))
+    return {"deleted": True}
+
+
 def reject_banned_reports(connection, author_id, reviewer_id, ban_report_id=None):
     connection.execute(
         """INSERT INTO report_events (report_id, actor_id, status, note, account_ban, ban_report_id)
            SELECT reports.id, ?, 'rejected', ?, 1, ? FROM reports
-           WHERE reports.owner_id = ? AND reports.withdrawn_at IS NULL AND NOT EXISTS (
+           WHERE reports.owner_id = ? AND reports.withdrawn_at IS NULL AND reports.deleted_at IS NULL AND NOT EXISTS (
                SELECT 1 FROM report_events WHERE report_id = reports.id AND account_ban = 1
            )""",
         (reviewer_id, BAN_REJECTION_NOTE, ban_report_id, author_id),
     )
     connection.execute(
-        "UPDATE reports SET status = 'rejected' WHERE owner_id = ? AND status <> 'rejected' AND withdrawn_at IS NULL",
+        """UPDATE reports SET status = 'rejected'
+           WHERE owner_id = ? AND status <> 'rejected' AND withdrawn_at IS NULL AND deleted_at IS NULL""",
         (author_id,),
     )
 

@@ -35,6 +35,19 @@ export function needsMax(session) {
     return session.mode === "max" && !session.user && !initData();
 }
 
+export async function showSiteVersion(footer) {
+    try {
+        const { version, bot, test } = await request("/api/version");
+        const labels = [version ? `Версия ${version}` : "Версия неизвестна"];
+        if (!bot) labels.push("без бота");
+        if (test) labels.push("тестовый режим");
+        footer.textContent = labels.join(" · ");
+        footer.hidden = false;
+    } catch {
+        footer.hidden = true;
+    }
+}
+
 export async function withTimeout(promise, milliseconds, code) {
     let timer;
     try {
@@ -50,6 +63,17 @@ let sessionRequest = null;
 let maxLaunchChecked = false;
 
 async function fetchSession() {
+    const url = new URL(location.href);
+    const ticket = new URLSearchParams(url.hash.slice(1)).get("camera_ticket");
+    if (ticket) {
+        url.hash = "";
+        history.replaceState(history.state, "", url);
+        try {
+            return { ...await request("/api/session/camera", { ticket }), camera_login: true };
+        } catch (error) {
+            return { ...await request("/api/session"), camera_login_error: error.message };
+        }
+    }
     const launchData = initData();
     if (!maxLaunchChecked && launchData) {
         try {

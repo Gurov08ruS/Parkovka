@@ -1,4 +1,4 @@
-import { request, initData, needsMax, withTimeout, loadSession, logoutSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
+import { request, initData, needsMax, withTimeout, loadSession, logoutSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink, showSiteVersion } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl } from "./report-view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -54,6 +54,10 @@ function setSession(data) {
         profileTabIcon.replaceChildren(user ? profileAvatar(user, "П") : defaultProfileIcon);
     }
     browserNotice.hidden = !needsMax(data);
+    if (data.camera_login_error) {
+        browserNotice.querySelector("p").textContent = data.camera_login_error;
+        browserNotice.hidden = false;
+    }
     if (data.mode === "max" && initData() && !bridge) {
         bridge = new Promise((resolve) => {
             if (window.WebApp?.PermissionsManager) {
@@ -351,6 +355,16 @@ export function showHistory(identifier, filter) {
     navigate("history", identifier, filter);
 }
 
+function reportConfirmation(label, text, submit, path, onSuccess) {
+    const confirmation = element("details", "", "report-confirmation");
+    const form = element("form", "", "panel-stack");
+    const feedback = statusMessage();
+    form.append(element("p", text), submitButton(submit), feedback);
+    formHandler(form, feedback, path, onSuccess);
+    confirmation.append(element("summary", label), form);
+    return confirmation;
+}
+
 async function showDetails(identifier, filter = "sent") {
     const version = openPanel(`Обращение №${identifier}`);
     const message = statusMessage("Загружаем обращение…");
@@ -364,17 +378,16 @@ async function showDetails(identifier, filter = "sent") {
         if (report.capture_id && editDraft) {
             panelContent.append(button("Продолжить черновик", () => editDraft(report), true));
         }
-        if (["pending", "under_review"].includes(report.status)) {
-            const confirmation = element("details", "", "withdraw-report");
-            const form = element("form", "", "panel-stack");
-            const feedback = statusMessage();
-            form.append(element("p", "После отзыва обращение снимут с проверки. Оно останется в вашей истории."),
-                submitButton("Подтвердить отзыв"), feedback);
-            formHandler(form, feedback, `${path}/withdraw`, () => {
-                if (activePanel(version)) return showDetails(identifier, filter);
-            });
-            confirmation.append(element("summary", "Отозвать обращение"), form);
-            panelContent.append(confirmation);
+        if (report.status === "draft") {
+            panelContent.append(reportConfirmation("Удалить черновик", "Снимки и данные черновика будут удалены.",
+                "Подтвердить удаление", `${path}/delete-draft`, () => {
+                    if (activePanel(version)) showHistory(undefined, "drafts");
+                }));
+        } else if (["pending", "under_review"].includes(report.status)) {
+            panelContent.append(reportConfirmation("Отозвать обращение", "После отзыва обращение снимут с проверки. Оно останется в вашей истории.",
+                "Подтвердить отзыв", `${path}/withdraw`, () => {
+                    if (activePanel(version)) return showDetails(identifier, filter);
+                }));
         }
     } catch (error) {
         if (!activePanel(version)) return;
@@ -490,5 +503,7 @@ parkingWarning.addEventListener("click", () => {
 });
 loadSession().then((data) => {
     if (session === null) setSession(data);
+    if (data.camera_login && currentTab === "home") $("open-report").click();
 }).catch(() => {});
 if (tabFromUrl() !== "home") renderLocation();
+void showSiteVersion($("site-version"));

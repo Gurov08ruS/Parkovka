@@ -22,10 +22,11 @@ class AccountBanned(Exception):
 
 
 class SessionProfiles:
-    def __init__(self):
+    def __init__(self, limit=None):
         self.lock = Lock()
         self.profiles = {}
         self.next_cleanup = 0
+        self.limit = limit
 
     def get(self, token_hash):
         with self.lock:
@@ -43,6 +44,13 @@ class SessionProfiles:
                     del self.profiles[key]
                 self.next_cleanup = now + 60
             self.profiles[token_hash] = (expiry, profile)
+            if self.limit is not None and len(self.profiles) > self.limit:
+                del self.profiles[next(iter(self.profiles))]
+
+    def take(self, token_hash):
+        with self.lock:
+            expiry, value = self.profiles.pop(token_hash, (0, None))
+            return value if expiry > time.time() else None
 
     def remove(self, token_hash):
         with self.lock:
@@ -154,7 +162,8 @@ def session_token_hash(token):
 
 
 def create_session(connection, source, max_id, old_token):
-    connection.execute("BEGIN IMMEDIATE")
+    if not connection.in_transaction:
+        connection.execute("BEGIN IMMEDIATE")
     current = session_account(connection, old_token, source)
     if current is not None and (max_id is None or current["max_id"] == max_id):
         ensure_active(connection, current["id"])
