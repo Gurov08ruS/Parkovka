@@ -658,39 +658,37 @@ a.panel-button { display: grid; place-items: center; text-align: center; text-de
 
 @media (prefers-color-scheme: dark) {
 	:root {
-		--ink: #e7f6ff;
-		--muted: #b7d0e6;
-		--paper: #112945;
-		--ice: #345d7a;
-		--sky: #0b2440;
-		--blue: #7cc4f7;
-		--strong-blue: #91dcff;
-		--deep-blue: #d5efff;
-		--heading: #e1f4ff;
-		--accent: #ff9cb5;
-		--card-border: #436987;
-		--edge-light: #b8e4ff6a;
-		--glass-glint: linear-gradient(180deg, #c2f2ff40, #8ad9ff12 45%, transparent 47%);
-		--glass-surface: linear-gradient(155deg, #28516ded, #1e3f5cde 52%, #21436cde);
-		--surface: linear-gradient(152deg, #234967f2, #162f4bec 62%, #163b51ed);
-		--field: linear-gradient(170deg, #102842, #183c58);
-		--chrome: linear-gradient(155deg, #284d67ef, #173a5dea 58%, #153752eb);
-		--dialog-surface: linear-gradient(145deg, #193b57fb, #102947fb 62%, #183f6afa);
-		--hero-surface: linear-gradient(140deg, #295982, #153e6d 50%, #1a5890);
-		--hero-halo: #6cc7fd42;
-		--hero-ring: #a8eaff37;
+		--ink: #eaf1fb;
+		--muted: #b2c4dc;
+		--paper: #121d2c;
+		--ice: #30445e;
+		--sky: #0b111c;
+		--blue: #6abaff;
+		--strong-blue: #96d8ff;
+		--deep-blue: #e4f1ff;
+		--heading: #edf5ff;
+		--accent: #ffacbc;
+		--card-border: #374e69;
+		--edge-light: #a5caff4d;
+		--glass-glint: linear-gradient(180deg, #c4e1ff24, #97c6ff08 44%, transparent 46%);
+		--glass-surface: linear-gradient(155deg, #283b54, #1b2b41 56%, #1a2d47);
+		--surface: linear-gradient(152deg, #202e42, #151f2e 62%, #17253a);
+		--field: linear-gradient(170deg, #0e1725, #172539);
+		--chrome: linear-gradient(155deg, #283950f5, #192639f2 56%, #17283ff4);
+		--dialog-surface: linear-gradient(145deg, #1c2d44, #121e30 62%, #17283f);
+		--hero-surface: linear-gradient(140deg, #20344f, #15253d 52%, #23476c);
+		--hero-halo: #67b1ff32;
+		--hero-ring: #91c4f525;
 		--blue-gel: linear-gradient(165deg, #236cac, #09549d 51%, #164984 71%, #2369aa);
 		--report-gel: linear-gradient(165deg, #ca2334, #ad1328 51%, #8b0d20 71%, #bc1b2e);
-		--sky-gel: linear-gradient(165deg, #356e9f, #26558a 54%, #224b80);
-		--glass-shadow: inset 0 1px 2px #c7eefe70, inset 0 -3px 9px #060f286b, 0 6px 16px #020a2063;
-		--soft-shadow: inset 0 1px 2px #a2d3f35c, 0 12px 26px #040f235b;
+		--sky-gel: linear-gradient(165deg, #34567c, #244263 54%, #1c3454);
+		--glass-shadow: inset 0 1px 2px #c3ddff40, inset 0 -3px 9px #050c1a55, 0 6px 16px #060b155e;
+		--soft-shadow: inset 0 1px 2px #b4d4ff33, 0 12px 26px #060a1466;
 		--gel-shadow: inset 0 1px 2px #c8edffd4, inset 0 -5px 10px #04183283, 0 5px 14px #020b20a8;
 		--backdrop: #020c19a8;
 		--page-background:
-			radial-gradient(ellipse at 20% 0%, #285d85 0%, transparent 42%),
-			radial-gradient(ellipse at 95% 22%, #0d4a70 0%, transparent 52%),
-			radial-gradient(ellipse at 14% 89%, #1d4d85 0%, transparent 51%),
-			linear-gradient(157deg, #0b2440, #142f4d 48%, #0c2d55);
+			radial-gradient(ellipse at 76% 0%, #1b2f49, transparent 54%),
+			linear-gradient(157deg, #0b111c, #101c2e 74%, #0d1828);
 	}
 }
 
@@ -698,7 +696,6 @@ html { background: var(--sky); }
 body {
 	min-height: 100dvh;
 	background: var(--page-background);
-	background-attachment: fixed;
 }
 a { color: var(--deep-blue); }
 main {
@@ -717,7 +714,17 @@ main {
 }
 .app-header { margin-bottom: 16px; }
 @media (prefers-color-scheme: dark) {
-	.app-logo { border-radius: 12px; background: linear-gradient(160deg, #f7fcff, #cce5ff); }
+	/* Highlight only the navy wordmark, leaving the transparent artwork and red badge intact. */
+	.app-logo::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background: url("images/brand-logo.webp") center / 100% auto no-repeat;
+		clip-path: inset(19% 3% 46% 38%);
+		filter: brightness(2.7) saturate(.7);
+	}
+	.about-button img { filter: brightness(1.45); }
 }
 .review-header { padding: 14px 16px; }
 .review-header h1 { letter-spacing: -.035em; }
@@ -908,10 +915,18 @@ main {
 @media (max-width: 600px), (max-height: 500px) and (pointer: coarse) {
 	.panel-dialog { border: 0; border-radius: 0; }
 	.panel-heading, .report-actions {
-		background: var(--chrome);
-		-webkit-backdrop-filter: blur(16px);
-		backdrop-filter: blur(16px);
+		background: var(--chrome), var(--paper);
 	}
+}
+@media (pointer: coarse), (max-width: 600px) {
+	.tab-bar, .panel-dialog, .panel-dialog::backdrop {
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+	}
+	.tab-bar { background-color: var(--paper); }
+	.hero, .guide { animation: none; }
+	.hero::before { display: none; }
+	.parking-platform, .parking-car img, .parking-warning img, .parking-warning:active img { filter: none; }
 }
 @media (min-width: 760px) {
 	main#home { width: min(100% - 56px, 960px); }
