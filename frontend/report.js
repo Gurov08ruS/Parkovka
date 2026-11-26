@@ -8,7 +8,6 @@ const cameraButton = document.querySelector("#open-camera");
 const cameraSettingsButton = document.querySelector("#camera-settings");
 const browserCameraLink = document.querySelector("#open-browser-camera");
 const detailButton = document.querySelector("#open-detail");
-const removeDetail = document.querySelector("#remove-detail");
 const takeButton = document.querySelector("#take-photo");
 const playButton = document.querySelector("#play-camera");
 const switchButton = document.querySelector("#switch-camera");
@@ -36,8 +35,6 @@ const photoStep = document.querySelector("#photo-step");
 const reviewStep = document.querySelector("#review-step");
 const placeholder = document.querySelector("#photo-placeholder");
 const nextStep = document.querySelector("#next-step");
-const previousStep = document.querySelector("#previous-step");
-const skipDetail = document.querySelector("#skip-detail");
 const reviewPhotos = document.querySelector("#review-photos");
 
 const locationPrompt = "Разрешите доступ к геолокации, чтобы определить адрес";
@@ -159,8 +156,6 @@ function updateButtons() {
     cameraButton.disabled = openingCamera || cameraActive || saving || saved;
     detailButton.hidden = cameraActive || step !== 2;
     detailButton.disabled = cameraButton.disabled || !photo;
-    removeDetail.hidden = cameraActive || step !== 2 || !detailPhoto;
-    removeDetail.disabled = cameraButton.disabled;
     comment.disabled = saving || saved;
     plateNumber.disabled = saving || saved;
     plateRegion.disabled = plateNumber.disabled;
@@ -174,12 +169,8 @@ function updateButtons() {
     saveButton.disabled = !position || !photo || locating || openingCamera || cameraActive || saving || saved;
     saveButton.hidden = saved;
     showSubmitted.hidden = !saved;
-    nextStep.disabled = openingCamera || saving || (step === 1 ? !photo : !detailPhoto);
+    nextStep.disabled = detailButton.disabled;
     nextStep.hidden = step === 3;
-    skipDetail.hidden = step !== 2 || Boolean(detailPhoto);
-    skipDetail.disabled = openingCamera || saving;
-    previousStep.hidden = step !== 2;
-    previousStep.disabled = openingCamera || saving;
     const backToPhotos = document.querySelector("#back-to-photos");
     backToPhotos.hidden = saved;
     backToPhotos.disabled = saving;
@@ -247,7 +238,7 @@ function showStep(value) {
     document.querySelector(".step-progress").setAttribute("aria-valuenow", String(step));
     document.querySelector("#step-progress").style.width = `${step * 100 / 3}%`;
     document.querySelector("#photo-title").textContent = step === 1
-        ? "Сделайте фото автомобиля на парковочном месте" : "Сделайте фото государственного номера";
+        ? "Сделайте фото автомобиля на парковочном месте" : "Если номер плохо виден, сделайте второе фото";
     cameraStatus.textContent = step === 1
         ? "В кадре должны быть видны автомобиль, парковочное место и знак или разметка"
         : "На снимке должен быть чётко виден номер этого же автомобиля";
@@ -948,16 +939,7 @@ browserCameraLink.addEventListener("click", (event) => {
     }
 });
 nextStep.addEventListener("click", () => showStep(step + 1));
-skipDetail.addEventListener("click", () => showStep(3));
-previousStep.addEventListener("click", () => showStep(1));
-document.querySelector("#back-to-photos").addEventListener("click", () => showStep(2));
-removeDetail.addEventListener("click", () => {
-    detailPhoto = null;
-    detailPreview.removeAttribute("src");
-    detailButton.textContent = "Сделать второе фото";
-    stopCamera();
-    scheduleDraft();
-});
+document.querySelector("#back-to-photos").addEventListener("click", () => showStep(1));
 comment.addEventListener("input", () => scheduleDraft(650));
 plateNumber.addEventListener("input", () => {
     const normalize = (value) => value.toUpperCase()
