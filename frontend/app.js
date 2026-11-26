@@ -1,4 +1,4 @@
-import { request, initData, needsMax, withTimeout, loadSession, logoutSession, element, statusMessage, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
+import { request, initData, needsMax, withTimeout, loadSession, logoutSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl } from "./report-view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -186,23 +186,12 @@ function showProfile() {
     const version = openPanel("Мой аккаунт");
     const user = session?.user;
     const identity = element("div", "", "profile-card");
-    const avatar = element("span", user?.first_name.slice(0, 1).toUpperCase() || "○", "profile-avatar");
-    avatar.setAttribute("aria-hidden", "true");
-    if (user?.photo_url) {
-        const photo = element("img");
-        photo.alt = "";
-        photo.hidden = true;
-        photo.onload = () => { photo.hidden = false; };
-        photo.onerror = () => { photo.hidden = true; };
-        photo.src = user.photo_url;
-        avatar.append(photo);
-    }
     const text = element("div");
     const name = user ? `${user.first_name} ${user.last_name}`.trim() || "Пользователь MAX" : "Гость";
     text.append(element("strong", name), element("p", user
         ? (session.mode === "test" ? "Тестовый аккаунт" : `ID MAX: ${user.max_id}`)
         : "Войдите, чтобы отправлять обращения"));
-    identity.append(avatar, text);
+    identity.append(profileAvatar(user), text);
     panelContent.append(identity);
     const menu = element("div", "", "profile-menu");
     if (user && session.mode === "test") menu.append(button("Личные данные", showEditProfile));

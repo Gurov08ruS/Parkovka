@@ -8,6 +8,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
+from accounts import safe_max_profile_url, safe_photo_url
+
 
 MAX_API = "https://platform-api2.max.ru"
 WEBHOOK_PATH = "/api/max/webhook"
@@ -80,16 +82,17 @@ class MaxBot:
         self.lock = Lock()
         self.sent = OrderedDict()
         self.sending = set()
+        self.dialogs = OrderedDict()
 
     def authenticates(self, secret):
         return bool(secret and hmac.compare_digest(secret.encode("utf-8"), self.secret.encode("ascii")))
 
-    def api(self, path, body=None):
+    def api(self, path, body=None, *, timeout=8):
         data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
         request = Request(f"{MAX_API}{path}", data, {"Content-Type": "application/json"} if data else {})
         request.add_unredirected_header("Authorization", self.token)
         try:
-            with urlopen(request, timeout=8, context=self.tls) as response:
+            with urlopen(request, timeout=timeout, context=self.tls) as response:
                 result = json.loads(response.read(1024 * 1024))
         except HTTPError as error:
             error.close()
@@ -106,6 +109,37 @@ class MaxBot:
         if not isinstance(result, dict) or result.get("success") is False:
             raise MaxApiError("MAX API отклонил запрос.")
         return result
+
+    def remember_dialog(self, user_id, chat_id, *, from_webhook=False):
+        if type(chat_id) is not int or not chat_id or not -(2 ** 63) <= chat_id < 2 ** 63:
+            return
+        identifier = str(user_id)
+        with self.lock:
+            if from_webhook or identifier not in self.dialogs:
+                self.dialogs[identifier] = chat_id
+            self.dialogs.move_to_end(identifier)
+            if len(self.dialogs) > 1024:
+                self.dialogs.popitem(last=False)
+
+    def author_profile(self, identifier):
+        with self.lock:
+            chat_id = self.dialogs.get(identifier)
+        if chat_id is None:
+            return None
+        try:
+            chat = self.api(f"/chats/{chat_id}", timeout=4)
+        except MaxApiError:
+            return None
+        user = object_field(chat, "dialog_with_user")
+        if chat.get("type") != "dialog" or str(user.get("user_id")) != identifier:
+            return None
+        first_name, last_name = (user.get(field) for field in ("first_name", "last_name"))
+        return (
+            first_name if isinstance(first_name, str) else "",
+            last_name if isinstance(last_name, str) else "",
+            safe_photo_url(user.get("avatar_url")) or safe_photo_url(user.get("full_avatar_url")),
+            safe_max_profile_url(user.get("profile_url")) or safe_max_profile_url(chat.get("link")),
+        )
 
     def register(self, url):
         result = self.api("/subscriptions", {"url": url, "update_types": UPDATE_TYPES, "secret": self.secret})
@@ -129,6 +163,10 @@ class MaxBot:
         if recipient is None:
             return
         user_id, key = recipient
+        chat_id = update.get("chat_id") if update.get("update_type") == "bot_started" else (
+            object_field(object_field(update, "message"), "recipient").get("chat_id")
+        )
+        self.remember_dialog(user_id, chat_id, from_webhook=True)
         if key is None:
             self.send_welcome(user_id)
             return

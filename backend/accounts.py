@@ -14,6 +14,7 @@ MAX_COOKIE_NAME = "__Host-stukach_max_session"
 SESSION_SECONDS = 8 * 60 * 60
 SIGNATURE_SECONDS = 60 * 60
 MAX_ID = re.compile(r"[1-9][0-9]{0,18}")
+MAX_PROFILE_PATH = re.compile(r"/u/[A-Za-z0-9_-]{1,160}/?")
 
 
 class AccountBanned(Exception):
@@ -99,8 +100,18 @@ def verify_max(init_data, token):
     max_id = str(user["id"])
     if not MAX_ID.fullmatch(max_id):
         raise ValueError("Некорректный ID пользователя MAX.")
-    fields = (max_id, *profile_names(user.get("first_name"), user.get("last_name") or ""))
-    photo_url = user.get("photo_url")
+    first_name, last_name = profile_names(user.get("first_name"), user.get("last_name") or "")
+    photo_url = safe_photo_url(user.get("photo_url"))
+    profile_url = safe_max_profile_url(user.get("profile_url"))
+    try:
+        chat = json.loads(params.get("chat", "null"))
+    except ValueError:
+        chat = None
+    chat_id = chat.get("id") if isinstance(chat, dict) and chat.get("type") == "DIALOG" else None
+    return max_id, (first_name, last_name, photo_url, profile_url), chat_id
+
+
+def safe_photo_url(photo_url):
     if not isinstance(photo_url, str) or len(photo_url) > 2048:
         photo_url = None
     if photo_url:
@@ -110,7 +121,19 @@ def verify_max(init_data, token):
                 photo_url = None
         except ValueError:
             photo_url = None
-    return fields, photo_url or None
+    return photo_url or None
+
+
+def safe_max_profile_url(value):
+    if not isinstance(value, str) or len(value) > 2048:
+        return None
+    try:
+        url = urlsplit(value)
+    except ValueError:
+        return None
+    if url.scheme == "https" and url.netloc.lower() == "max.ru" and MAX_PROFILE_PATH.fullmatch(url.path):
+        return f"https://max.ru{url.path.rstrip('/')}"
+    return None
 
 
 def cookie_token(header, source):

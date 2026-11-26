@@ -88,6 +88,21 @@ export function statusMessage(text = "") {
     return message;
 }
 
+export function profileAvatar(profile) {
+    const avatar = element("span", profile?.first_name?.slice(0, 1).toUpperCase() || "○", "profile-avatar");
+    avatar.setAttribute("aria-hidden", "true");
+    if (profile?.photo_url) {
+        const photo = element("img");
+        photo.alt = "";
+        photo.referrerPolicy = "no-referrer";
+        photo.hidden = true;
+        photo.onload = () => { photo.hidden = false; };
+        photo.src = profile.photo_url;
+        avatar.append(photo);
+    }
+    return avatar;
+}
+
 export function button(text, action, primary = false) {
     const node = element("button", text, primary ? "panel-button primary-button" : "panel-button");
     node.type = "button";

@@ -131,6 +131,7 @@ class AppServer(ThreadingHTTPServer):
     def __init__(self, *args, logs, **kwargs):
         self.logs = logs
         self.session_profiles = SessionProfiles()
+        self.max_profiles = SessionProfiles()
         super().__init__(*args, **kwargs)
 
     def server_bind(self):
@@ -220,10 +221,13 @@ class AppHandler(SimpleHTTPRequestHandler):
     def session_data(self, account, token_hash=None):
         user = None
         if account is not None:
-            token_hash = token_hash or session_token_hash(self.request_session_token())
-            profile = self.server.session_profiles.get(token_hash)
-            default_name = ("Тестовый", "пользователь", None) if self.source == "test" else ("", "", None)
-            first_name, last_name, photo_url = profile or default_name
+            if self.source == "max":
+                profile = self.server.max_profiles.get(account["max_id"])
+                first_name, last_name, photo_url, _ = profile or ("", "", None, None)
+            else:
+                token_hash = token_hash or session_token_hash(self.request_session_token())
+                profile = self.server.session_profiles.get(token_hash)
+                first_name, last_name, photo_url = profile or ("Тестовый", "пользователь", None)
             user = {
                 "max_id": account["max_id"], "first_name": first_name, "last_name": last_name,
                 "photo_url": photo_url, "reviewer": self.is_reviewer(account),
@@ -321,7 +325,16 @@ class AppHandler(SimpleHTTPRequestHandler):
             content_type = "image/png" if image.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg"
             self.send_data(HTTPStatus.OK, image, content_type)
         else:
-            self.send_json(HTTPStatus.OK, report_detail(connection, identifier, account, reviewer))
+            report = report_detail(connection, identifier, account, reviewer)
+            if reviewer and report["author"]["source"] == "max":
+                author = report["author"]
+                max_id = author["max_id"]
+                live_profile = self.max_bot.author_profile(max_id) if self.max_bot else None
+                profile = live_profile or self.server.max_profiles.get(max_id)
+                if profile:
+                    first_name, last_name, photo_url, profile_url = profile
+                    author.update(first_name=first_name, last_name=last_name, photo_url=photo_url, profile_url=profile_url)
+            self.send_json(HTTPStatus.OK, report)
 
     def do_POST(self):
         path = self.path.partition("?")[0]
@@ -376,15 +389,14 @@ class AppHandler(SimpleHTTPRequestHandler):
         if path == "/api/session":
             profile = None
             max_id = None
+            chat_id = None
             if self.source == "max":
                 if not self.bot_token:
                     raise ApiError(HTTPStatus.SERVICE_UNAVAILABLE, "Вход через MAX пока недоступен.")
                 try:
-                    fields, photo_url = verify_max(data.get("init_data"), self.bot_token)
+                    max_id, profile, chat_id = verify_max(data.get("init_data"), self.bot_token)
                 except ValueError as error:
                     raise ApiError(HTTPStatus.UNAUTHORIZED, str(error)) from error
-                max_id, first_name, last_name = fields
-                profile = (first_name, last_name, photo_url)
             with connection:
                 token, account = create_session(connection, self.source, max_id, token_hash)
             profiles = self.server.session_profiles
@@ -396,7 +408,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 max_age = max(0, account["expires_at"] - int(time.time()))
                 headers = (self.session_cookie(token or old_token, max_age),)
             if profile:
-                profiles.put(token_hash, account["expires_at"], profile)
+                self.server.max_profiles.put(max_id, account["expires_at"], profile)
+                if self.max_bot:
+                    self.max_bot.remember_dialog(max_id, chat_id)
             self.send_json(HTTPStatus.OK, self.session_data(account, token_hash), *headers)
             return
 

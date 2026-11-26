@@ -257,7 +257,7 @@ def report_detail(connection, identifier, account, reviewer):
             report["capture_id"] = row["capture_id"]
     if reviewer:
         author = connection.execute(
-            """SELECT accounts.id, accounts.max_id,
+            """SELECT accounts.id, accounts.max_id, accounts.source,
                       COALESCE(account_bans.active, 0) AS banned,
                       account_bans.reason AS ban_reason
                FROM reports JOIN accounts ON accounts.id = reports.owner_id

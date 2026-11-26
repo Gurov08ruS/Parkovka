@@ -1,4 +1,4 @@
-import { request, initData, needsMax, loadSession, element, statusMessage, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
+import { request, initData, needsMax, loadSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses } from "./report-view.js";
 
 const content = document.getElementById("review-content");
@@ -79,9 +79,26 @@ async function showQueue(current) {
 function authorControls(report, path) {
     const author = report.author;
     const card = element("section", "", "panel-stack capture-section");
+    const identity = element("div", "", "profile-card");
+    const details = element("div");
+    const fromMax = author.source === "max";
+    const name = [author.first_name, author.last_name].filter(Boolean).join(" ");
+    details.append(element("strong", name || (fromMax ? "Пользователь MAX" : "Тестовый аккаунт")));
+    if (fromMax) details.append(element("p", `ID MAX: ${author.max_id}`));
+    identity.append(profileAvatar(author), details);
     card.append(
         element("h3", "Автор обращения"),
-        element("p", author.max_id.startsWith("test-") ? "Тестовый аккаунт" : `ID MAX: ${author.max_id}`),
+        identity,
+    );
+    if (author.profile_url) {
+        const link = panelLink("Открыть профиль в MAX", author.profile_url);
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        card.append(link);
+    } else if (fromMax) {
+        card.append(element("p", "Ссылка на профиль недоступна в MAX", "capture-note"));
+    }
+    card.append(
         element("p", author.banned ? "Аккаунт заблокирован" : "Аккаунт активен"),
         decisionStats(author.stats),
     );
