@@ -28,6 +28,9 @@ const detailPreview = document.querySelector("#detail-preview");
 const photoPreviews = document.querySelector("#photo-previews");
 const comment = document.querySelector("#report-comment");
 const plateNumber = document.querySelector("#plate-number");
+const plateRegion = document.querySelector("#plate-region");
+const plateRegionFlag = document.querySelector("#plate-region-flag");
+const plateRegionNote = document.querySelector("#plate-region-note");
 const showSubmitted = document.querySelector("#show-submitted");
 const photoStep = document.querySelector("#photo-step");
 const reviewStep = document.querySelector("#review-step");
@@ -81,6 +84,9 @@ let flashAvailable = false;
 let changingFlash = false;
 let capturing = false;
 let locating = false;
+let locationAttempted = false;
+let locationRegion = "";
+let plateRegions;
 let openingCamera = false;
 let saving = false;
 let openCameraSettings;
@@ -154,6 +160,7 @@ function updateButtons() {
     removeDetail.disabled = cameraButton.disabled;
     comment.disabled = saving || saved;
     plateNumber.disabled = saving || saved;
+    plateRegion.disabled = plateNumber.disabled;
     const cameraBusy = openingCamera || capturing || changingFlash;
     takeButton.disabled = cameraBusy || !stream || !playButton.hidden || !hasCameraFrame();
     switchButton.disabled = cameraBusy || !cameraActive || !lastCamera || saved;
@@ -205,6 +212,8 @@ function resetReport() {
     clearTimeout(draftTimer);
     window.removeEventListener("beforeunload", protectDraft);
     locating = openingCamera = saving = false;
+    locationAttempted = false;
+    locationRegion = "";
     openCameraSettings = undefined;
     cameraSettingsButton.hidden = true;
     lastCamera = null;
@@ -213,6 +222,8 @@ function resetReport() {
     detailPreview.removeAttribute("src");
     comment.value = "";
     plateNumber.value = "";
+    plateRegion.value = "";
+    updatePlateRegion();
     locateButton.textContent = "Определить местоположение";
     cameraButton.textContent = "Открыть камеру";
     detailButton.textContent = "Сделать второе фото";
@@ -248,6 +259,49 @@ function showStep(value) {
     }
     updateButtons();
     dialog.scrollTop = 0;
+    if (step === 3) {
+        updatePlateRegion();
+        locatePlateRegion();
+    }
+}
+
+function splitPlate(value) {
+    return /^(?<plate>[a-zа-я]\s*[0-9]{3}\s*[a-zа-я]\s*[a-zа-я])[\s-]*(?<region>[0-9]{2,3})$/iu.exec(value.trim())?.groups
+        ?? { plate: value, region: "" };
+}
+
+function updatePlateRegion() {
+    const manual = plateRegion.value || splitPlate(plateNumber.value).region;
+    plateRegion.placeholder = locationRegion || "—";
+    plateRegionNote.hidden = true;
+    plateRegionFlag.hidden = true;
+    if (!/^[0-9]{2,3}$/.test(manual || locationRegion)) return;
+    plateRegions ??= request("/plate-regions.json").catch(() => {
+        plateRegions = null;
+        return {};
+    });
+    void plateRegions.then((regions) => {
+        const confirmed = plateRegion.value || splitPlate(plateNumber.value).region;
+        const code = confirmed || locationRegion;
+        if (!/^[0-9]{2,3}$/.test(code)) return;
+        const suffix = code.slice(-2);
+        const primary = Object.hasOwn(regions, suffix)
+            ? suffix : Object.keys(regions).find((key) => regions[key].codes?.includes(suffix));
+        if (primary) {
+            const slot = Number(primary);
+            plateRegionFlag.style.backgroundPosition = `${slot % 10 * 100 / 9}% ${Math.floor(slot / 10) * 100 / 9}%`;
+            plateRegionFlag.setAttribute("aria-label", `Флаг региона: ${regions[primary].name}`);
+            plateRegionFlag.hidden = false;
+        }
+        plateRegionNote.textContent = [regions[primary]?.name, !confirmed && "Предположение по месту съёмки"].filter(Boolean).join(" · ");
+        plateRegionNote.hidden = !plateRegionNote.textContent;
+    });
+}
+
+function locatePlateRegion() {
+    if (!saving && !locationAttempted && !locationRegion && !plateRegion.value && !splitPlate(plateNumber.value).region) {
+        void locate({ reusePosition: Boolean(position) });
+    }
 }
 
 function getPosition(enableHighAccuracy) {
@@ -260,13 +314,15 @@ function getPosition(enableHighAccuracy) {
     });
 }
 
-async function locate() {
-    if (!window.isSecureContext) {
+async function locate({ reusePosition = false } = {}) {
+    if (locating) return;
+    locationAttempted = true;
+    if (!reusePosition && !window.isSecureContext) {
         locationStatus.textContent = secureContextMessage;
         deviceFailure("location", "context", "insecure_context");
         return;
     }
-    if (!navigator.geolocation) {
+    if (!reusePosition && !navigator.geolocation) {
         locationStatus.textContent = "Этот браузер не поддерживает геолокацию";
         deviceFailure("location", "context", "api_unavailable");
         return;
@@ -277,33 +333,41 @@ async function locate() {
     updateButtons();
     locationStatus.textContent = "Запрашиваем местоположение…";
     try {
-        let result;
-        try {
-            result = await getPosition(true);
-        } catch (error) {
-            if (current !== session) return;
-            if (error?.code !== 2 && error?.code !== 3) throw error;
-            locationStatus.textContent = "Точная позиция недоступна. Пробуем обычный режим…";
-            result = await getPosition(false);
+        let accuracy;
+        if (!reusePosition) {
+            let result;
+            try {
+                result = await getPosition(true);
+            } catch (error) {
+                if (current !== session) return;
+                if (error?.code !== 2 && error?.code !== 3) throw error;
+                locationStatus.textContent = "Точная позиция недоступна. Пробуем обычный режим…";
+                result = await getPosition(false);
+            }
+            if (current !== session || saving) return;
+            const { latitude, longitude, accuracy: meters } = result.coords;
+            if (!Number.isFinite(latitude) || Math.abs(latitude) > 90
+                || !Number.isFinite(longitude) || Math.abs(longitude) > 180) {
+                throw { code: "invalid_coordinates" };
+            }
+            position = { latitude, longitude };
+            accuracy = meters;
+            address = null;
+            locationRegion = "";
+            updatePlateRegion();
+            scheduleDraft();
         }
-        if (current !== session || saving) return;
-        const { coords } = result;
-        if (!Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90
-            || !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180) {
-            throw { code: "invalid_coordinates" };
-        }
-        position = { latitude: coords.latitude, longitude: coords.longitude };
-        address = null;
-        scheduleDraft();
-        const accuracy = Number.isFinite(coords.accuracy) ? ` (точность ±${Math.round(coords.accuracy)} м)` : "";
-        const display = `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}${accuracy}`;
+        const precision = Number.isFinite(accuracy) ? ` (точность ±${Math.round(accuracy)} м)` : "";
+        const display = `${position.latitude.toFixed(5)}, ${position.longitude.toFixed(5)}${precision}`;
         locationStatus.textContent = `${display}. Ищем адрес…`;
         try {
             const result = await request("/api/geocode", position);
             if (current !== session || saving) return;
-            address = result.address;
-            if (address) scheduleDraft();
-            else deviceFailure("location", "address", "address_not_found");
+            address = result.address || address;
+            locationRegion = result.region_code || "";
+            updatePlateRegion();
+            if (address || locationRegion) scheduleDraft();
+            if (!address) deviceFailure("location", "address", "address_not_found");
         } catch {
             if (current !== session) return;
             deviceFailure("location", "address", "lookup_failed");
@@ -638,9 +702,14 @@ function takePhoto() {
 }
 
 function capturePayload() {
+    const { plate, region } = splitPlate(plateNumber.value);
+    const manualRegion = plateRegion.value || region;
+    const regionCode = manualRegion || locationRegion;
     return {
         ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
-        comment: comment.value, plate_number: plateNumber.value, capture_id: captureId, owner_max_id: captureOwner,
+        comment: comment.value, plate_number: plate, capture_id: captureId, owner_max_id: captureOwner,
+        plate_region: /^[0-9]{2,3}$/.test(regionCode) ? regionCode : null,
+        plate_region_source: manualRegion ? "manual" : "location",
     };
 }
 
@@ -758,7 +827,10 @@ async function openDraft(report, user) {
             locateButton.textContent = "Определить заново";
         }
         comment.value = report.comment;
-        plateNumber.value = report.plate_number || "";
+        const { plate, region } = splitPlate(report.plate_number || "");
+        plateNumber.value = plate;
+        if (report.plate_region_source === "location") locationRegion = report.plate_region || "";
+        else plateRegion.value = report.plate_region || region;
         showStep(3);
         draftStatus.textContent = "Черновик сохранён";
     } catch (error) {
@@ -766,6 +838,7 @@ async function openDraft(report, user) {
     } finally {
         saving = false;
         updateButtons();
+        if (step === 3) locatePlateRegion();
     }
 }
 
@@ -817,7 +890,7 @@ dialog.addEventListener("close", () => {
 for (const eventName of ["dragover", "drop"]) {
     dialog.addEventListener(eventName, (event) => event.preventDefault());
 }
-locateButton.addEventListener("click", locate);
+locateButton.addEventListener("click", () => locate());
 cameraButton.addEventListener("click", () => openCamera("overview"));
 detailButton.addEventListener("click", () => openCamera("detail"));
 cameraSettingsButton.addEventListener("click", async () => {
@@ -849,7 +922,23 @@ removeDetail.addEventListener("click", () => {
     scheduleDraft();
 });
 comment.addEventListener("input", () => scheduleDraft(650));
-plateNumber.addEventListener("input", () => scheduleDraft(650));
+plateNumber.addEventListener("input", () => {
+    updatePlateRegion();
+    scheduleDraft(650);
+});
+plateNumber.addEventListener("change", () => {
+    const { plate, region } = splitPlate(plateNumber.value);
+    if (!region) return;
+    plateNumber.value = plate;
+    plateRegion.value ||= region;
+    updatePlateRegion();
+});
+plateRegion.addEventListener("input", () => {
+    plateRegion.value = plateRegion.value.replace(/[^0-9]/g, "");
+    updatePlateRegion();
+    locatePlateRegion();
+    scheduleDraft(650);
+});
 showSubmitted.addEventListener("click", () => {
     const identifier = submittedId;
     dialog.close();

@@ -20,7 +20,7 @@ TRANSITIONS = {
 }
 REPORT_QUERY = """
     SELECT reports.id, CASE WHEN withdrawn_at IS NOT NULL THEN 'withdrawn' ELSE reports.status END AS status,
-           latitude, longitude, plate_number, plate_source, plate_verification,
+           latitude, longitude, plate_number, plate_source, plate_verification, plate_region, plate_region_source,
            comment, created_at, submitted_at, withdrawn_at,
            address, captured_at, captures.report_id IS NOT NULL AS has_photo,
            detail_photo IS NOT NULL AS has_detail_photo,
@@ -71,6 +71,7 @@ def initialize_database(database):
             ("reports", {
                 "owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT",
                 "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT", "withdrawn_at": "TEXT",
+                "plate_region": "TEXT", "plate_region_source": "TEXT",
                 "deleted_at": "TEXT", "deleted_capture_id": "TEXT",
             }),
             ("report_events", {
@@ -132,7 +133,13 @@ def report_fields(data, *, draft):
     location = coordinates(data) if has_position or not draft else (None, None)
     comment = clean_text(data.get("comment", ""), "Комментарий", 1000)
     plate = clean_text(data.get("plate_number", ""), "Госномер", 32).upper() or None
-    return (*location, comment, plate, "manual" if plate else None, "unverified" if plate else None)
+    region = data.get("plate_region")
+    region_source = None
+    if region is not None:
+        if not isinstance(region, str) or not re.fullmatch(r"[0-9]{2,3}", region):
+            raise ValueError("Код региона должен состоять из двух или трёх цифр.")
+        region_source = "location" if has_position and data.get("plate_region_source") == "location" else "manual"
+    return (*location, comment, plate, "manual" if plate else None, "unverified" if plate else None, region, region_source)
 
 
 def create_draft(connection, data, owner_id):
@@ -140,8 +147,9 @@ def create_draft(connection, data, owner_id):
     connection.execute("BEGIN IMMEDIATE")
     ensure_active(connection, owner_id)
     identifier = connection.execute(
-        """INSERT INTO reports (owner_id, latitude, longitude, comment, plate_number, plate_source, plate_verification)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO reports (owner_id, latitude, longitude, comment, plate_number, plate_source, plate_verification,
+                                plate_region, plate_region_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (owner_id, *fields),
     ).lastrowid
     return report_json(connection.execute(REPORT_QUERY + " WHERE reports.id = ?", (identifier,)).fetchone())
@@ -188,7 +196,8 @@ def save_capture(connection, data, owner_id, *, draft=False):
 
     connection.execute(
         """UPDATE reports SET latitude = ?, longitude = ?, comment = ?,
-                              plate_number = ?, plate_source = ?, plate_verification = ? WHERE id = ?""",
+                              plate_number = ?, plate_source = ?, plate_verification = ?,
+                              plate_region = ?, plate_region_source = ? WHERE id = ?""",
         (*fields, identifier),
     )
     connection.execute(
@@ -311,7 +320,7 @@ def delete_draft(connection, identifier, account):
             """UPDATE reports SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
                    deleted_capture_id = (SELECT capture_id FROM report_captures WHERE report_id = reports.id),
                    latitude = NULL, longitude = NULL, comment = '', plate_number = NULL,
-                   plate_source = NULL, plate_verification = NULL WHERE id = ?""",
+                   plate_source = NULL, plate_verification = NULL, plate_region = NULL, plate_region_source = NULL WHERE id = ?""",
             (identifier,),
         )
         connection.execute("DELETE FROM report_captures WHERE report_id = ?", (identifier,))

@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS reports (
     plate_number TEXT,
     plate_source TEXT,
     plate_verification TEXT,
+    plate_region TEXT,
+    plate_region_source TEXT,
     comment TEXT NOT NULL DEFAULT '' CHECK (length(comment) <= 1000),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     owner_id INTEGER REFERENCES accounts(id),

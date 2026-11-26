@@ -25,6 +25,10 @@ function reportStatus(report) {
     return element("span", statuses[report.status] || report.status, `report-status status-${report.status}`);
 }
 
+function plateLabel(report) {
+    return [report.plate_number, report.plate_region].filter(Boolean).join(" ");
+}
+
 function appendBanNotice(container, report, banLink) {
     if (!report.auto_rejected) return;
     const notice = element("p", banNotice, "report-ban-notice");
@@ -61,7 +65,9 @@ export function reportCard(report, path, control, banLink) {
     card.append(heading, element("small", `${placeLabel(report)} · ${dateLabel(report.submitted_at || report.created_at)}`));
     appendBanNotice(card, report, banLink);
     if (report.plate_number) {
-        card.append(element("p", `Госномер: ${report.plate_number} · Не подтверждён`, "report-plate-summary"));
+        const plate = element("p", `Госномер: ${plateLabel(report)} · Не подтверждён`, "report-plate-summary");
+        if (report.plate_region_source === "location") plate.append(element("small", "Регион предположен по месту съёмки"));
+        card.append(plate);
     }
     if (report.has_photo) {
         const gallery = element("div", "", "report-photos");
@@ -88,7 +94,8 @@ export function appendReportDetails(container, report, path, banLink) {
     if (report.captured_at) container.append(element("p", `Снято ${dateLabel(report.captured_at)}`));
     if (report.plate_number) {
         const plate = element("div", "", "report-plate-summary");
-        plate.append(element("strong", report.plate_number), element("span", "Не подтверждён"));
+        plate.append(element("strong", plateLabel(report)), element("span", "Не подтверждён"));
+        if (report.plate_region_source === "location") plate.append(element("small", "Регион предположен по месту съёмки"));
         container.append(plate);
     }
     if (report.comment) container.append(element("p", report.comment, "report-comment"));
