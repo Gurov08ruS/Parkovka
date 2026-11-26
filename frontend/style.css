@@ -491,7 +491,7 @@ a.panel-button { display: grid; place-items: center; text-align: center; text-de
 }
 
 .status-pending { background: #FFF0B3; color: #684A00; }
-.status-approved { background: #D9EFDF; color: #245F39; }
+.status-approved { background: #d7eeff; color: #104d85; }
 .status-rejected { background: #FCE2E5; color: #921C26; }
 .report-ban-notice { font-size: 14px; }
 .report-ban-notice a { color: var(--deep-blue); }
@@ -618,13 +618,13 @@ a.panel-button { display: grid; place-items: center; text-align: center; text-de
 	--surface: linear-gradient(152deg, #ffffffef, #ebf9ffee 54%, #d5effae6);
 	--field: linear-gradient(170deg, #f8fdff, #e2f3fc);
 	--chrome: linear-gradient(155deg, #fffffff2, #d1f0f9e8 48%, #b5dfffeb);
-	--dialog-surface: linear-gradient(145deg, #f3fcfff7, #d7effbee 62%, #defff0f2);
-	--hero-surface: linear-gradient(140deg, #effdff, #b3e4ff 54%, #87c4f3 100%);
+	--dialog-surface: linear-gradient(145deg, #f3fcfff7, #d7effbee 62%, #c9e8fff2);
+	--hero-surface: linear-gradient(140deg, #effdff, #afe3ff 54%, #7ebfff 100%);
 	--hero-halo: #f7ffffdd;
 	--hero-ring: #ecfbff92;
 	--blue-gel: linear-gradient(165deg, #187ac8, #0861b5 51%, #144e9c 71%, #1769b7);
 	--rose-gel: linear-gradient(165deg, #c3285a, #ab1c4c 51%, #951b57 71%, #bc3263);
-	--mint-gel: linear-gradient(165deg, #e9fff3, #a9efdf 55%, #8dd9d5);
+	--sky-gel: linear-gradient(165deg, #e7f8ff, #9fd9ff 55%, #76bfff);
 	--glass-shadow: inset 0 1px 2px #fffffff2, inset 0 -3px 7px #417fba33, 0 5px 14px #2d73ae34;
 	--soft-shadow: inset 0 1px 2px #ffffffe6, 0 12px 26px #246ca12b;
 	--gel-shadow: inset 0 1px 2px #ffffffb8, inset 0 -5px 10px #102e653b, 0 5px 14px #215b9c43;
@@ -634,8 +634,8 @@ a.panel-button { display: grid; place-items: center; text-align: center; text-de
 	--page-background:
 		radial-gradient(ellipse at 17% 0%, #f7ffff 0%, transparent 43%),
 		radial-gradient(ellipse at 95% 12%, #65cafb 0%, transparent 50%),
-		radial-gradient(ellipse at 13% 88%, #a4edcc 0%, transparent 55%),
-		linear-gradient(157deg, #b9e8fc, #deefff 48%, #a7dcf3);
+		radial-gradient(ellipse at 13% 88%, #8dd2ff 0%, transparent 55%),
+		linear-gradient(157deg, #b9e8fc, #deefff 48%, #a2d6ff);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -657,13 +657,13 @@ a.panel-button { display: grid; place-items: center; text-align: center; text-de
 		--surface: linear-gradient(152deg, #234967f2, #162f4bec 62%, #163b51ed);
 		--field: linear-gradient(170deg, #102842, #183c58);
 		--chrome: linear-gradient(155deg, #284d67ef, #173a5dea 58%, #153752eb);
-		--dialog-surface: linear-gradient(145deg, #193b57fb, #102947fb 62%, #123d4dfa);
-		--hero-surface: linear-gradient(140deg, #265579, #123d65 50%, #145b7a);
+		--dialog-surface: linear-gradient(145deg, #193b57fb, #102947fb 62%, #183f6afa);
+		--hero-surface: linear-gradient(140deg, #295982, #153e6d 50%, #1a5890);
 		--hero-halo: #6cc7fd42;
 		--hero-ring: #a8eaff37;
 		--blue-gel: linear-gradient(165deg, #236cac, #09549d 51%, #164984 71%, #2369aa);
 		--rose-gel: linear-gradient(165deg, #a63161, #90214d 51%, #731a47 71%, #a12d60);
-		--mint-gel: linear-gradient(165deg, #2b6974, #1b525c 54%, #205369);
+		--sky-gel: linear-gradient(165deg, #356e9f, #26558a 54%, #224b80);
 		--glass-shadow: inset 0 1px 2px #c7eefe70, inset 0 -3px 9px #060f286b, 0 6px 16px #020a2063;
 		--soft-shadow: inset 0 1px 2px #a2d3f35c, 0 12px 26px #040f235b;
 		--gel-shadow: inset 0 1px 2px #c8edffd4, inset 0 -5px 10px #04183283, 0 5px 14px #020b20a8;
@@ -671,8 +671,8 @@ a.panel-button { display: grid; place-items: center; text-align: center; text-de
 		--page-background:
 			radial-gradient(ellipse at 20% 0%, #285d85 0%, transparent 42%),
 			radial-gradient(ellipse at 95% 22%, #0d4a70 0%, transparent 52%),
-			radial-gradient(ellipse at 14% 89%, #165761 0%, transparent 51%),
-			linear-gradient(157deg, #0b2440, #142f4d 48%, #0a2c40);
+			radial-gradient(ellipse at 14% 89%, #1d4d85 0%, transparent 51%),
+			linear-gradient(157deg, #0b2440, #142f4d 48%, #0c2d55);
 	}
 }
 
@@ -757,7 +757,7 @@ main {
 .guide-heading {
 	padding-inline: 18px;
 	border-bottom: 1px solid var(--card-border);
-	background: var(--glass-glint), var(--mint-gel);
+	background: var(--glass-glint), var(--sky-gel);
 }
 .steps img, .profile-avatar, .achievement-icon {
 	border: 1px solid var(--edge-light);
@@ -795,12 +795,12 @@ main {
 .tab-bar svg { width: 22px; height: 22px; }
 .tab-bar [aria-current], .tab-bar::before {
 	border-radius: 19px;
-	background: var(--glass-glint), var(--mint-gel);
+	background: var(--glass-glint), var(--sky-gel);
 	box-shadow: var(--glass-shadow);
 }
 @media (hover: hover) {
 	.tab-bar > :hover { background: var(--glass-glint); }
-	.tab-bar [aria-current]:hover { background: var(--glass-glint), var(--mint-gel); }
+	.tab-bar [aria-current]:hover { background: var(--glass-glint), var(--sky-gel); }
 }
 @media (prefers-reduced-motion: no-preference) {
 	.tab-bar [aria-current], .tab-bar [aria-current]:hover { background: transparent; box-shadow: none; }
@@ -840,7 +840,7 @@ main {
 @media (hover: hover) {
 	:where(.panel-button, .about-button, .report-confirmation summary):not(:disabled):hover,
 	#report-form button:enabled:hover { filter: brightness(1.075); }
-	.about-button:hover { background: var(--glass-glint), var(--mint-gel); }
+	.about-button:hover { background: var(--glass-glint), var(--sky-gel); }
 }
 #report-form .panel-heading button, .panel-heading .panel-button {
 	border: 1px solid var(--card-border);
@@ -889,7 +889,7 @@ main {
 .report-status { padding: 4px 9px; border-radius: 999px; box-shadow: inset 0 1px 1px var(--edge-light); }
 @media (prefers-color-scheme: dark) {
 	.status-pending, .report-plate-summary span { background: #544023; color: #ffdf9e; }
-	.status-approved { background: #214e40; color: #baf9cf; }
+	.status-approved { background: #214d78; color: #c2e6ff; }
 	.status-rejected { background: #59283c; color: #ffd0db; }
 }
 
