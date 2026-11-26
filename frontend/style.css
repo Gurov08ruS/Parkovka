@@ -194,6 +194,14 @@ main {
 .profile-menu .panel-button { width: 100%; text-align: left; }
 .achievement-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .achievement-card { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.achievement-card .achievement-icon { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 28px; }
+.achievement-card[data-earned="true"] { border-color: var(--blue); }
+.achievement-mark, .achievement-details summary { font-size: 13px; color: var(--muted); }
+.achievement-card[data-earned="true"] .achievement-mark { color: var(--deep-blue); font-weight: 700; }
+.achievement-details { width: 100%; }
+.achievement-details summary { cursor: pointer; }
+.achievement-details p, .achievement-details button { margin-top: 8px; }
+.service-rules { display: grid; gap: 10px; padding-inline-start: 1.3em; }
 .report-card { display: grid; gap: 10px; }
 .report-card-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .report-filter { display: flex; gap: 8px; }

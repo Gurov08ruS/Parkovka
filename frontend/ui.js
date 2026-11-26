@@ -10,7 +10,9 @@ export async function request(path, body, { keepalive = false } = {}) {
             keepalive,
         });
     } catch {
-        throw new Error("Не удалось связаться с сервером. Попробуйте ещё раз");
+        const error = new Error("Не удалось связаться с сервером. Попробуйте ещё раз");
+        error.connectionFailed = true;
+        throw error;
     }
     let data;
     try {

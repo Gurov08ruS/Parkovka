@@ -21,6 +21,12 @@ let afterLogin = null;
 let panelVersion = 0;
 let bridge;
 let editDraft;
+let syncDrafts;
+
+export function registerOfflineDraftSync(sync) {
+    syncDrafts = sync;
+    if (session?.user && navigator.onLine) void sync(session.user.max_id);
+}
 
 browserNotice.append(maxBotLink());
 maxLogin.append(maxBotLink());
@@ -49,6 +55,7 @@ function setSession(data) {
     const previousUser = session?.user;
     const user = data.user;
     session = data;
+    if (user && navigator.onLine && syncDrafts) void syncDrafts(user.max_id);
     if (previousUser?.max_id !== user?.max_id || previousUser?.first_name !== user?.first_name
         || previousUser?.last_name !== user?.last_name || previousUser?.photo_url !== user?.photo_url) {
         profileTabIcon.replaceChildren(user ? profileAvatar(user, "П") : defaultProfileIcon);
@@ -151,7 +158,11 @@ function openLogin(action) {
     }
 }
 
-export async function requireAccount(action) {
+export async function requireAccount(action, { allowOffline = false } = {}) {
+    if (allowOffline && !navigator.onLine && session?.user) {
+        action(session.user);
+        return;
+    }
     const version = panelVersion;
     try {
         if (loginRequest) await loginRequest;
@@ -160,6 +171,10 @@ export async function requireAccount(action) {
         setSession(data);
     } catch (error) {
         if (version !== panelVersion) return;
+        if (allowOffline && error.connectionFailed && session?.user) {
+            action(session.user);
+            return;
+        }
         const content = currentTab === "home" || $("report-dialog").open ? openModalPanel("Вход") : panelContent;
         showSessionError(content, error, () => {
             if (panel.open) panel.close();
@@ -239,6 +254,7 @@ function showProfile() {
     menu.append(
         button("Мои достижения", () => navigate("achievements")),
         button("Черновики", () => navigate("history", null, "drafts")),
+        button("Правила использования", () => showRules()),
         button("О проекте", showAbout),
     );
     panelContent.append(menu);
@@ -295,25 +311,77 @@ function showEditProfile() {
     panelContent.append(button("Назад", showProfile), profile);
 }
 
-function showAchievements() {
-    openPanel("Мои достижения");
-    panelContent.append(element("p", "Здесь собраны достижения, которые можно получить во время использования сервиса. Начисление достижений находится в разработке"));
+async function showAchievements() {
+    const version = openPanel("Мои достижения");
     const grid = element("div", "", "achievement-grid");
-    for (const [icon, title, description] of [
-        ["★", "Первый шаг", "За первое отправленное обращение"],
-        ["◉", "Чёткий кадр", "За два качественных снимка"],
-        ["☁", "Всегда на связи", "За успешную синхронизацию"],
-        ["⌖", "Внимательный наблюдатель", "За точные координаты и время"],
-        ["✓", "Знаю правила", "За ознакомление с правилами сервиса"],
-        ["♡", "Надёжный помощник", "За ответственное использование сервиса"],
+    const progress = new Map();
+    for (const [code, icon, title, description, condition] of [
+        ["first_report", "⭐", "Первый шаг", "За первое обращение", "Впервые успешно отправьте обращение через приложение."],
+        ["two_photos", "📸", "Чёткий кадр", "За две фотографии", "Приложите к одному обращению общий снимок автомобиля на парковочном месте и отдельный снимок с госномером."],
+        ["offline_sync", "☁️", "Всегда на связи", "За синхронизацию офлайн", "Создайте обращение или черновик без интернета. Достижение откроется после синхронизации с сервером."],
+        ["gps_capture", "📍", "Внимательный наблюдатель", "За точные координаты", "Отправьте обращение с определёнными GPS-координатами и временем фиксации."],
+        ["rules_read", "📖", "Знаю правила", "За изучение правил", "Откройте правила использования и нажмите «Я ознакомился»."],
+        ["three_accepted", "🤝", "Надёжный помощник", "За три принятых обращения", "Дождитесь, когда проверяющий примет три ваших обращения."],
     ]) {
         const card = element("article", "", "achievement-card");
         const badge = element("span", icon, "achievement-icon");
         badge.setAttribute("aria-hidden", "true");
-        card.append(badge, element("strong", title), element("p", description));
+        const mark = element("span", "", "achievement-mark");
+        const details = element("details", "", "achievement-details");
+        details.append(element("summary", "Как получить"), element("p", condition));
+        if (code === "rules_read") details.append(button("Правила использования", () => showRules(card.dataset.earned === "true")));
+        card.append(badge, element("strong", title), element("p", description), mark, details);
         grid.append(card);
+        progress.set(code, { card, mark });
     }
-    panelContent.append(grid);
+    const message = statusMessage("Загружаем достижения…");
+    panelContent.append(message, grid);
+    try {
+        const data = await loadSession();
+        if (!activePanel(version)) return;
+        setSession(data);
+        if (!data.user) {
+            message.textContent = "Войдите, чтобы увидеть свои достижения.";
+            message.after(button("Войти в аккаунт", () => requireAccount(showAchievements), true));
+            return;
+        }
+        if (navigator.onLine) await syncDrafts?.(data.user.max_id);
+        const { earned } = await request("/api/achievements");
+        if (!activePanel(version)) return;
+        message.remove();
+        for (const [code, { card, mark }] of progress) {
+            const unlocked = earned.includes(code);
+            card.dataset.earned = String(unlocked);
+            mark.textContent = unlocked ? "Получено" : "Пока не получено";
+        }
+    } catch (error) {
+        if (activePanel(version)) message.textContent = error.message;
+    }
+}
+
+function showRules(acknowledged = false, error = "") {
+    const content = openModalPanel("Правила использования");
+    const rules = element("ul", "", "service-rules");
+    for (const text of [
+        "Отправляйте обращения о возможных нарушениях на парковочных местах для людей с инвалидностью.",
+        "Снимайте автомобиль, номер и парковочный знак или разметку. Используйте снимки, сделанные на месте.",
+        "Проверьте геолокацию и адрес перед отправкой. Добавляйте только относящиеся к обращению сведения.",
+        "Решение внутренней проверки доступно в разделе «Обращения».",
+    ]) rules.append(element("li", text));
+    const accept = button("Я ознакомился", () => {
+        panel.close();
+        requireAccount(async () => {
+            try {
+                await request("/api/achievements/rules", {});
+                if (currentTab === "achievements") void showAchievements();
+                showRules(true);
+            } catch (error) {
+                showRules(false, error.message);
+            }
+        });
+    }, true);
+    accept.disabled = acknowledged;
+    content.append(rules, accept, statusMessage(acknowledged ? "Ознакомление сохранено." : error));
 }
 
 async function showList(filter = "sent") {
@@ -327,6 +395,8 @@ async function showList(filter = "sent") {
     const message = statusMessage("Загружаем обращения…");
     panelContent.append(filters, message);
     try {
+        if (navigator.onLine && session?.user) await syncDrafts?.(session.user.max_id);
+        if (!activePanel(version)) return;
         const { reports } = await request("/api/reports");
         if (!activePanel(version)) return;
         const visible = reports.filter((report) => {
@@ -401,6 +471,7 @@ function showAbout() {
     content.append(
         element("p", "«ЧУЖОЕ МЕСТО» помогает сохранять доступность парковочных мест для людей с инвалидностью"),
         element("p", "Результат внутренней проверки описывает качество и содержание материалов"),
+        button("Правила использования", () => showRules()),
     );
 }
 
@@ -488,6 +559,9 @@ for (const tab of Object.keys(tabTitles)) {
     $("open-" + tab).addEventListener("click", () => navigate(tab));
 }
 window.addEventListener("popstate", renderLocation);
+window.addEventListener("online", () => {
+    if (currentTab === "achievements") void showAchievements();
+});
 $("open-about").addEventListener("click", showAbout);
 function animateSceneButton(control, keyframes, duration) {
     let motion;

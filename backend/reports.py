@@ -6,6 +6,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from accounts import clean_text, ensure_active
+from achievements import award, award_accepted_reports, backfill_achievements
 from database import ensure_key, open_database
 from plates import LETTER_TRANSLATION, PLATE_CHARACTERS, PLATE_WITH_REGION, REGISTRATION_CODES
 
@@ -97,6 +98,9 @@ def initialize_database(database):
                 if name in columns:
                     connection.execute(f"ALTER TABLE accounts DROP COLUMN {name}")
             connection.execute("PRAGMA user_version = 3")
+        if connection.execute("PRAGMA user_version").fetchone()[0] < 4:
+            backfill_achievements(connection)
+            connection.execute("PRAGMA user_version = 4")
         connection.execute("""CREATE TRIGGER IF NOT EXISTS enqueue_max_report_notification
             AFTER INSERT ON report_events
             WHEN NEW.status IN ('pending', 'approved', 'rejected') AND EXISTS (
@@ -233,6 +237,10 @@ def save_capture(connection, data, owner_id, *, draft=False):
                detail_photo = excluded.detail_photo, captured_at = excluded.captured_at""",
         (identifier, capture_id, address, photo, detail, captured_at),
     )
+    if previous is None and data.get("offline_created") is True:
+        award(connection, owner_id, "offline_sync")
+    if detail is not None:
+        award(connection, owner_id, "two_photos")
     if not draft:
         connection.execute(
             "UPDATE reports SET status = 'pending', submitted_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
@@ -242,6 +250,9 @@ def save_capture(connection, data, owner_id, *, draft=False):
             "INSERT INTO report_events (report_id, actor_id, status) VALUES (?, ?, 'pending')",
             (identifier, owner_id),
         )
+        award(connection, owner_id, "first_report")
+        if captured_at is not None:
+            award(connection, owner_id, "gps_capture")
     return visible_report(connection, identifier, {"id": owner_id}, False), previous is None
 
 
@@ -419,4 +430,7 @@ def change_status(connection, identifier, account, data):
         "INSERT INTO report_events (report_id, actor_id, status, note) VALUES (?, ?, ?, ?)",
         (identifier, account["id"], status, note),
     )
+    if status == "approved":
+        owner_id = connection.execute("SELECT owner_id FROM reports WHERE id = ?", (identifier,)).fetchone()[0]
+        award_accepted_reports(connection, owner_id)
     return report_detail(connection, identifier, account, reviewer=True)

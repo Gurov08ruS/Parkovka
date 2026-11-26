@@ -24,6 +24,7 @@ from accounts import (
     AccountBanned, COOKIE_NAME, MAX_COOKIE_NAME, SessionProfiles, clean_text, cookie_token, create_session,
     ensure_active, profile_names, session_account, session_token_hash, verify_max,
 )
+from achievements import award, earned_achievements
 from device_logs import log_camera_error, log_location_error
 from max_bot import WEBHOOK_PATH, MaxApiError, MaxBot, webhook_url
 
@@ -81,7 +82,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.4.4"
+VERSION = "0.5.0"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
@@ -322,6 +323,10 @@ class AppHandler(SimpleHTTPRequestHandler):
         if path == "/api/session":
             self.send_json(HTTPStatus.OK, self.session_data(self.account(connection, required=False)))
             return
+        if path == "/api/achievements":
+            account = self.account(connection)
+            self.send_json(HTTPStatus.OK, earned_achievements(connection, account["id"]))
+            return
         if path == f"{REPORTS_PATH}/stats":
             account = self.account(connection)
             self.send_json(HTTPStatus.OK, account_report_stats(connection, account["id"]))
@@ -370,7 +375,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         diagnostic = DEVICE_DIAGNOSTICS.get(path)
         if path not in {
             "/api/session", "/api/session/camera", "/api/camera/handoff", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
-            REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH,
+            REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH, "/api/achievements/rules",
         } and not (status_route or ban_route or withdraw_route or delete_draft_route or diagnostic):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -465,6 +470,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None)
+        if path == "/api/achievements/rules":
+            with connection:
+                award(connection, account["id"], "rules_read")
+            self.send_json(HTTPStatus.OK, earned_achievements(connection, account["id"]))
+            return
         if path == "/api/camera/handoff":
             if self.source != "max" or not self.bot_token:
                 raise ApiError(HTTPStatus.FORBIDDEN, "Этот переход доступен из мини-приложения MAX.")

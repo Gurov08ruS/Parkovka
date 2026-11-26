@@ -1,5 +1,6 @@
-import { registerDraftEditor, requestMaxCameraAccess, maxCameraSettings, requireAccount, showHistory } from "./app.js";
-import { request, initData, withTimeout } from "./ui.js";
+import { registerDraftEditor, registerOfflineDraftSync, requestMaxCameraAccess, maxCameraSettings, requireAccount, showHistory } from "./app.js";
+import { request, initData, loadSession, withTimeout } from "./ui.js";
+import { saveOfflineDraft, removeOfflineDraft, uploadOfflineDrafts } from "./offline-drafts.js";
 
 const dialog = document.querySelector("#report-dialog");
 const form = document.querySelector("#report-form");
@@ -72,6 +73,10 @@ let photoKind = "overview";
 let captureId = null;
 let captureOwner = null;
 let submittedId = null;
+let startedOffline = false;
+let localOnly = false;
+let remoteSaved = false;
+const queuedDraftSync = new Map();
 let draftRevision = 0;
 let savedRevision = 0;
 let draftTimer;
@@ -201,6 +206,7 @@ function resetReport() {
     session += 1;
     step = 1;
     position = address = photo = detailPhoto = capturedAt = captureId = captureOwner = submittedId = null;
+    startedOffline = localOnly = remoteSaved = false;
     draftRevision = savedRevision = 0;
     draftSave = null;
     clearTimeout(draftTimer);
@@ -699,7 +705,10 @@ function takePhoto() {
         cameraFailure("capture", "photo_too_large", "Снимок слишком большой. Попробуйте ещё раз");
         return;
     }
-    captureId ??= crypto.randomUUID();
+    if (captureId === null) {
+        captureId = crypto.randomUUID();
+        startedOffline = !navigator.onLine;
+    }
     if (photoKind === "overview") {
         photo = encoded;
         capturedAt = new Date().toISOString();
@@ -724,6 +733,7 @@ function capturePayload(regions = null) {
     return {
         ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
         comment: comment.value, plate_number: plate, capture_id: captureId, owner_max_id: captureOwner,
+        offline_created: startedOffline,
         plate_region: /^[0-9]{2,3}$/.test(regionCode) && (!regions || regions.has(regionCode)) ? regionCode : null,
         plate_region_source: manualRegion ? "manual" : "location",
     };
@@ -737,15 +747,42 @@ function protectDraft(event) {
 function flushDraft() {
     clearTimeout(draftTimer);
     if (draftSave) return draftSave;
-    if (!photo || submittedId !== null || savedRevision === draftRevision) return Promise.resolve();
+    if (!photo || submittedId !== null || (savedRevision === draftRevision && !(localOnly && navigator.onLine))) {
+        return Promise.resolve();
+    }
     const current = session;
     draftStatus.textContent = "Сохраняем черновик…";
     draftSave = (async () => {
-        while (savedRevision !== draftRevision) {
+        while (savedRevision !== draftRevision || (localOnly && navigator.onLine)) {
             const revision = draftRevision;
             const regions = plateRegion.value || splitPlate(plateNumber.value).region ? await loadPlateRegions() : null;
             if (current !== session) return;
-            const result = await request("/api/reports/capture/draft", capturePayload(regions));
+            const payload = capturePayload(regions);
+            if (localOnly || !navigator.onLine) {
+                await saveOfflineDraft(payload);
+                localOnly = true;
+                if (!navigator.onLine) {
+                    savedRevision = revision;
+                    continue;
+                }
+            }
+            let result;
+            try {
+                result = await request("/api/reports/capture/draft", payload);
+            } catch (error) {
+                if (!error.connectionFailed || current !== session) throw error;
+                startedOffline ||= !remoteSaved;
+                await saveOfflineDraft({ ...payload, offline_created: startedOffline });
+                localOnly = true;
+                savedRevision = revision;
+                if (savedRevision !== draftRevision) draftTimer = setTimeout(autosaveDraft, 650);
+                break;
+            }
+            remoteSaved = true;
+            if (localOnly) {
+                await removeOfflineDraft(payload.capture_id);
+                localOnly = false;
+            }
             if (current !== session) return;
             savedRevision = revision;
             if (result.submitted_at) {
@@ -756,11 +793,22 @@ function flushDraft() {
             }
         }
         window.removeEventListener("beforeunload", protectDraft);
-        draftStatus.textContent = submittedId === null ? "Черновик сохранён" : "Обращение уже отправлено";
+        draftStatus.textContent = localOnly ? "Черновик сохранён на устройстве и синхронизируется после подключения."
+            : submittedId === null ? "Черновик сохранён" : "Обращение уже отправлено";
     })().finally(() => {
         if (current === session) draftSave = null;
     });
     return draftSave;
+}
+
+function syncDraftsFor(owner) {
+    if (!queuedDraftSync.has(owner)) {
+        const pending = uploadOfflineDrafts(owner, () => dialog.open ? captureId : null).catch((error) => {
+            console.warn("Не удалось синхронизировать черновики", error);
+        }).finally(() => { queuedDraftSync.delete(owner); });
+        queuedDraftSync.set(owner, pending);
+    }
+    return queuedDraftSync.get(owner);
 }
 
 async function autosaveDraft() {
@@ -793,7 +841,7 @@ async function closeReport() {
         await flushDraft();
         const identifier = submittedId;
         dialog.close();
-        showHistory(identifier, identifier === null ? "drafts" : "sent");
+        if (navigator.onLine && !localOnly) showHistory(identifier, identifier === null ? "drafts" : "sent");
     } catch (error) {
         draftStatus.textContent = `Не удалось сохранить черновик. ${error.message}`;
         if (error.status === 401) void requireAccount(closeReport);
@@ -828,6 +876,7 @@ async function openDraft(report, user) {
             report.has_detail_photo ? readDraftPhoto(report.id, "detail") : null,
         ]);
         captureId = report.capture_id;
+        remoteSaved = true;
         captureOwner = user.max_id;
         capturedAt = report.captured_at;
         photo = main.split(",", 2)[1];
@@ -879,7 +928,15 @@ async function saveReport(event) {
     updateButtons();
     saveStatus.textContent = "Отправляем обращение…";
     try {
-        await draftSave?.catch(() => {});
+        if (!navigator.onLine || localOnly) {
+            await flushDraft();
+            if (!navigator.onLine) {
+                saveStatus.textContent = "Черновик сохранён. Подключитесь к интернету, чтобы отправить обращение.";
+                return;
+            }
+        } else {
+            await draftSave?.catch(() => {});
+        }
         const result = await request("/api/reports/capture", capturePayload());
         submittedId = result.id;
         window.removeEventListener("beforeunload", protectDraft);
@@ -904,9 +961,10 @@ document.querySelector("#open-report").addEventListener("click", () => {
         resetReport();
         captureOwner = user.max_id;
         dialog.showModal();
-    });
+    }, { allowOffline: true });
 });
 registerDraftEditor((report) => requireAccount((user) => openDraft(report, user)));
+registerOfflineDraftSync(syncDraftsFor);
 closeButton.addEventListener("click", closeReport);
 dialog.addEventListener("cancel", (event) => {
     event.preventDefault();
@@ -1008,7 +1066,14 @@ document.addEventListener("visibilitychange", () => {
         cameraFailure("stream", "document_hidden", "Камера остановлена, пока вкладка была скрыта. Откройте её ещё раз");
     }
 });
-window.addEventListener("online", () => {
-    if (dialog.open && !saving) void autosaveDraft();
+window.addEventListener("online", async () => {
+    try {
+        const { user } = await loadSession();
+        if (!user) return;
+        if (dialog.open && !saving && captureOwner === user.max_id) void autosaveDraft();
+        await syncDraftsFor(user.max_id);
+    } catch (error) {
+        console.warn("Не удалось восстановить синхронизацию", error);
+    }
 });
 window.addEventListener("pagehide", () => stopCamera());
