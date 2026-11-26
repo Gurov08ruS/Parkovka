@@ -52,6 +52,7 @@ except ImportError as error:
     raise SystemExit(f"Не удалось загрузить SQLCipher: {error}\n{setup}") from None
 
 from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
+from plates import LOCATION_CODES, normalize_region
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft, delete_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
@@ -78,22 +79,11 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
 FRONTEND = Path(__file__).parent.parent / "frontend"
-
-
-def normalize_region(name):
-    return re.sub(r"[^а-яa-z0-9]+", " ", name.casefold().replace("ё", "е")).strip()
-
-
-REGION_CODES = {
-    normalize_region(name): code
-    for code, region in json.loads((FRONTEND / "plate-regions.json").read_text(encoding="utf-8")).items()
-    for name in [region["name"], *region.get("aliases", [])]
-}
 
 
 def git_commit_id():
@@ -146,7 +136,7 @@ def reverse_geocode(latitude, longitude):
         place.get("city") or place.get("locality"), street, place.get("housenumber"),
     ))) if street else None
     region = place.get("state") or (place.get("name") if place.get("type") == "state" else None)
-    region_code = REGION_CODES.get(normalize_region(region)) if place.get("countrycode") == "RU" and isinstance(region, str) else None
+    region_code = LOCATION_CODES.get(normalize_region(region)) if place.get("countrycode") == "RU" and isinstance(region, str) else None
     return {"address": address, "region_code": region_code}
 
 

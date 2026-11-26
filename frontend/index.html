@@ -4,8 +4,8 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 	<meta name="color-scheme" content="light dark">
-	<meta name="theme-color" content="#F2FAFA" media="(prefers-color-scheme: light)">
-	<meta name="theme-color" content="#0C1625" media="(prefers-color-scheme: dark)">
+	<meta name="theme-color" content="#BFE8FC" media="(prefers-color-scheme: light)">
+	<meta name="theme-color" content="#0B2440" media="(prefers-color-scheme: dark)">
 	<link rel="stylesheet" type="text/css" href="style.css">
 	<script src="report.js" type="module"></script>
 	<title>Чужое место — фиксация нарушений парковки на местах для инвалидов</title>
@@ -36,8 +36,8 @@
 						<img src="images/exclamation.png" alt="" width="375" height="726">
 					</button>
 				</div>
+				<button id="open-report" type="button" class="report-button">Зафиксировать нарушение</button>
 			</section>
-			<button id="open-report" type="button" class="report-button">Зафиксировать нарушение</button>
 			<section class="guide" aria-labelledby="guide-title">
 				<div class="guide-heading">
 					<h2 id="guide-title">Как отправить обращение</h2>
@@ -58,7 +58,6 @@
 					</li>
 				</ol>
 			</section>
-			<div class="home-note">Ваше внимание помогает сохранять доступность</div>
 		</div>
 		<section class="tab-screen" id="tab-screen" aria-labelledby="tab-title" hidden>
 			<h2 id="tab-title"></h2>
@@ -128,7 +127,7 @@
 						<div class="plate-field">
 							<label for="plate-number">Госномер автомобиля <span>Необязательно</span></label>
 							<div class="plate-input">
-								<input id="plate-number" type="text" maxlength="32" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="А123ВС" aria-describedby="plate-note">
+							<input id="plate-number" type="text" maxlength="32" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="А123ВС" aria-describedby="plate-note" pattern="[АВЕКМНОРСТУХ0-9 \-]*">
 								<div class="plate-region-field">
 									<label for="plate-region">Регион</label>
 									<input id="plate-region" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{2,3}" autocomplete="off" placeholder="—" aria-describedby="plate-region-note">

@@ -42,6 +42,9 @@ const reviewPhotos = document.querySelector("#review-photos");
 
 const locationPrompt = "Разрешите доступ к геолокации, чтобы определить адрес";
 const photoPrompt = "На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля";
+const latinPlateLetters = "ABEKMHOPCTYX";
+const plateLetters = "АВЕКМНОРСТУХ";
+const invalidRegionMessage = "Такого кода региона нет. Проверьте номер автомобиля.";
 const secureContextMessage = "По HTTP в локальной сети браузер блокирует доступ. Используйте доверенный HTTPS или откройте 127.0.0.1 на компьютере с сервером";
 const defaultCamera = { facingMode: { ideal: "environment" } };
 const cameraMessages = new Map([
@@ -270,30 +273,52 @@ function splitPlate(value) {
         ?? { plate: value, region: "" };
 }
 
+function loadPlateRegions() {
+    plateRegions ??= request("/plate-regions.json").then((regions) => new Map(
+        Object.entries(regions).flatMap(([primary, region]) =>
+            [primary, ...(region.codes || [])].map((code) => [code, { ...region, primary }])),
+    )).catch(() => {
+        plateRegions = null;
+        return null;
+    });
+    return plateRegions;
+}
+
+function showPlateRegionError(message) {
+    plateRegion.setCustomValidity(message);
+    if (message) plateRegion.setAttribute("aria-invalid", "true");
+    else plateRegion.removeAttribute("aria-invalid");
+    plateRegionNote.classList.toggle("field-error", Boolean(message));
+    if (message) {
+        plateRegionNote.textContent = message;
+        plateRegionNote.hidden = false;
+    }
+}
+
 function updatePlateRegion() {
     const manual = plateRegion.value || splitPlate(plateNumber.value).region;
     plateRegion.placeholder = locationRegion || "—";
     plateRegionNote.hidden = true;
     plateRegionFlag.hidden = true;
+    showPlateRegionError(manual.length === 1 ? "Введите две или три цифры кода региона." : "");
     if (!/^[0-9]{2,3}$/.test(manual || locationRegion)) return;
-    plateRegions ??= request("/plate-regions.json").catch(() => {
-        plateRegions = null;
-        return {};
-    });
-    void plateRegions.then((regions) => {
+    void loadPlateRegions().then((regions) => {
         const confirmed = plateRegion.value || splitPlate(plateNumber.value).region;
         const code = confirmed || locationRegion;
-        if (!/^[0-9]{2,3}$/.test(code)) return;
-        const suffix = code.slice(-2);
-        const primary = Object.hasOwn(regions, suffix)
-            ? suffix : Object.keys(regions).find((key) => regions[key].codes?.includes(suffix));
-        if (primary) {
-            const slot = Number(primary);
+        if (!regions || !/^[0-9]{2,3}$/.test(code)) return;
+        const region = regions.get(code);
+        if (!region && confirmed) {
+            showPlateRegionError(invalidRegionMessage);
+            return;
+        }
+        showPlateRegionError("");
+        if (region && region.flag !== false) {
+            const slot = Number(region.primary);
             plateRegionFlag.style.backgroundPosition = `${slot % 10 * 100 / 9}% ${Math.floor(slot / 10) * 100 / 9}%`;
-            plateRegionFlag.setAttribute("aria-label", `Флаг региона: ${regions[primary].name}`);
+            plateRegionFlag.setAttribute("aria-label", `Флаг региона: ${region.name}`);
             plateRegionFlag.hidden = false;
         }
-        plateRegionNote.textContent = [regions[primary]?.name, !confirmed && "Предположение по месту съёмки"].filter(Boolean).join(" · ");
+        plateRegionNote.textContent = [region?.name, !confirmed && "Предположение по месту съёмки"].filter(Boolean).join(" · ");
         plateRegionNote.hidden = !plateRegionNote.textContent;
     });
 }
@@ -701,14 +726,14 @@ function takePhoto() {
     photoPreviews.scrollIntoView({ block: "nearest" });
 }
 
-function capturePayload() {
+function capturePayload(regions = null) {
     const { plate, region } = splitPlate(plateNumber.value);
     const manualRegion = plateRegion.value || region;
     const regionCode = manualRegion || locationRegion;
     return {
         ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
         comment: comment.value, plate_number: plate, capture_id: captureId, owner_max_id: captureOwner,
-        plate_region: /^[0-9]{2,3}$/.test(regionCode) ? regionCode : null,
+        plate_region: /^[0-9]{2,3}$/.test(regionCode) && (!regions || regions.has(regionCode)) ? regionCode : null,
         plate_region_source: manualRegion ? "manual" : "location",
     };
 }
@@ -727,7 +752,9 @@ function flushDraft() {
     draftSave = (async () => {
         while (savedRevision !== draftRevision) {
             const revision = draftRevision;
-            const result = await request("/api/reports/capture/draft", capturePayload());
+            const regions = plateRegion.value || splitPlate(plateNumber.value).region ? await loadPlateRegions() : null;
+            if (current !== session) return;
+            const result = await request("/api/reports/capture/draft", capturePayload(regions));
             if (current !== session) return;
             savedRevision = revision;
             if (result.submitted_at) {
@@ -845,6 +872,16 @@ async function openDraft(report, user) {
 async function saveReport(event) {
     event.preventDefault();
     if (saveButton.disabled) return;
+    if (plateRegion.value || splitPlate(plateNumber.value).region) {
+        const regions = await loadPlateRegions();
+        const code = plateRegion.value || splitPlate(plateNumber.value).region;
+        if (code && regions && !regions.has(code)) {
+            showPlateRegionError(invalidRegionMessage);
+            plateRegion.reportValidity();
+            return;
+        }
+        if (saveButton.disabled) return;
+    }
 
     clearTimeout(draftTimer);
     saving = true;
@@ -923,6 +960,16 @@ removeDetail.addEventListener("click", () => {
 });
 comment.addEventListener("input", () => scheduleDraft(650));
 plateNumber.addEventListener("input", () => {
+    const normalize = (value) => value.toUpperCase()
+        .replace(/[ABEKMHOPCTYX]/g, (letter) => plateLetters[latinPlateLetters.indexOf(letter)])
+        .replace(/[^АВЕКМНОРСТУХ0-9 -]/g, "");
+    const original = plateNumber.value;
+    const filtered = normalize(original);
+    if (filtered !== original) {
+        const cursor = normalize(original.slice(0, plateNumber.selectionStart)).length;
+        plateNumber.value = filtered;
+        plateNumber.setSelectionRange(cursor, cursor);
+    }
     updatePlateRegion();
     scheduleDraft(650);
 });

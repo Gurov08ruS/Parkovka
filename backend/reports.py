@@ -7,6 +7,7 @@ from pathlib import Path
 
 from accounts import clean_text, ensure_active
 from database import ensure_key, open_database
+from plates import LETTER_TRANSLATION, PLATE_CHARACTERS, PLATE_WITH_REGION, REGISTRATION_CODES
 
 
 SCHEMA = Path(__file__).with_name("schema.sql")
@@ -132,13 +133,23 @@ def report_fields(data, *, draft):
     has_position = data.get("latitude") is not None or data.get("longitude") is not None
     location = coordinates(data) if has_position or not draft else (None, None)
     comment = clean_text(data.get("comment", ""), "Комментарий", 1000)
-    plate = clean_text(data.get("plate_number", ""), "Госномер", 32).upper() or None
+    plate = clean_text(data.get("plate_number", ""), "Госномер", 32).upper().translate(LETTER_TRANSLATION)
+    if not PLATE_CHARACTERS.fullmatch(plate):
+        raise ValueError("В госномере допустимы цифры и буквы А, В, Е, К, М, Н, О, Р, С, Т, У, Х.")
     region = data.get("plate_region")
+    provided_source = data.get("plate_region_source")
+    if matched := PLATE_WITH_REGION.fullmatch(plate):
+        plate, inline_region = matched.groups()
+        if region is None:
+            region, provided_source = inline_region, "manual"
+    plate = plate or None
     region_source = None
     if region is not None:
         if not isinstance(region, str) or not re.fullmatch(r"[0-9]{2,3}", region):
             raise ValueError("Код региона должен состоять из двух или трёх цифр.")
-        region_source = "location" if has_position and data.get("plate_region_source") == "location" else "manual"
+        if region not in REGISTRATION_CODES:
+            raise ValueError("Такого кода региона нет. Проверьте номер автомобиля.")
+        region_source = "location" if has_position and provided_source == "location" else "manual"
     return (*location, comment, plate, "manual" if plate else None, "unverified" if plate else None, region, region_source)
 
 
