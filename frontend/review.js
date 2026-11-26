@@ -1,4 +1,4 @@
-import { request, initData, loadSession, element, statusMessage, button, submitButton, field, formHandler, panelLink } from "./ui.js";
+import { request, initData, needsMax, loadSession, element, statusMessage, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses } from "./report-view.js";
 
 const content = document.getElementById("review-content");
@@ -35,22 +35,13 @@ function showLogin({ mode, user }) {
         formHandler(form, message, "/api/reviewer", loadPage);
     } else {
         title.textContent = "Вход в аккаунт";
-        if (mode === "max" && !initData()) {
-            content.replaceChildren(statusMessage("Для входа откройте приложение в MAX и войдите в аккаунт"));
+        if (needsMax({ mode, user })) {
+            content.replaceChildren(statusMessage("Откройте бота в MAX, чтобы зарегистрироваться и войти."), maxBotLink());
             return;
         }
-        if (mode === "test") {
-            form.append(
-                field("ID MAX", "max_id", { inputMode: "numeric", maxLength: 19, required: true }),
-                field("Имя", "first_name", { autocomplete: "given-name", maxLength: 80, required: true }),
-                field("Фамилия", "last_name", { autocomplete: "family-name", maxLength: 80, required: true }),
-            );
-            formHandler(form, message, "/api/session", loadPage);
-        } else {
-            formHandler(form, message, "/api/session", loadPage, () => ({ init_data: initData() }));
-        }
+        formHandler(form, message, "/api/session", loadPage, () => mode === "test" ? {} : { init_data: initData() });
     }
-    form.append(submitButton(!user && mode === "max" ? "Войти через MAX" : "Войти"), message);
+    form.append(submitButton(user ? "Войти" : mode === "test" ? "Войти в тестовом режиме" : "Войти через MAX"), message);
     content.replaceChildren(form);
 }
 
@@ -90,7 +81,7 @@ function authorControls(report, path) {
     const card = element("section", "", "panel-stack capture-section");
     card.append(
         element("h3", "Автор обращения"),
-        element("p", `ID MAX: ${author.max_id}`),
+        element("p", author.max_id.startsWith("test-") ? "Тестовый аккаунт" : `ID MAX: ${author.max_id}`),
         element("p", author.banned ? "Аккаунт заблокирован" : "Аккаунт активен"),
         decisionStats(author.stats),
     );
@@ -161,8 +152,9 @@ async function loadPage() {
         if (current !== version) return;
         if (!session.user?.reviewer) {
             account.hidden = true;
-            title.hidden = !session.review_enabled;
-            if (session.review_enabled) showLogin(session);
+            const canSignIn = session.review_enabled || needsMax(session);
+            title.hidden = !canSignIn;
+            if (canSignIn) showLogin(session);
             else content.replaceChildren(statusMessage("Кабинет проверяющего недоступен"));
             return;
         }

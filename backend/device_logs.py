@@ -2,17 +2,19 @@ import json
 
 
 STAGES = {"context", "max_permissions", "stream", "preview", "capture", "switch", "flash"}
+PLATFORMS = {"android", "ios", "desktop", "web", "browser", "unknown"}
 CODES = {
-    "insecure_context", "api_unavailable", "document_hidden", "track_ended", "preview_timeout",
+    "insecure_context", "api_unavailable", "policy_blocked", "document_hidden", "track_ended", "preview_timeout",
     "video_error", "frame_unavailable", "invalid_jpeg", "invalid_image", "photo_too_large",
     "AbortError", "InvalidStateError", "NotAllowedError", "NotFoundError", "NotReadableError",
     "NotSupportedError", "OverconstrainedError", "SecurityError", "TypeError", "UnknownError",
-    "MaxAppPermissionDenied", "MaxSystemPermissionDenied", "MaxPermissionError",
+    "MaxAppPermissionDenied", "MaxSystemPermissionDenied", "MaxPermissionError", "MaxBridgeUnavailable",
+    "MaxPermissionTimeout", "MaxSettingsError", "CameraStreamTimeout",
 }
 LOCATION_CODES = {
     "context": {"insecure_context", "api_unavailable"},
     "position": {"permission_denied", "position_unavailable", "timeout", "invalid_coordinates", "unknown_error"},
-    "address": {"lookup_failed"},
+    "address": {"lookup_failed", "address_not_found"},
 }
 
 
@@ -38,4 +40,7 @@ def write_event(logger, event, data):
         if type(data.get(field)) is not bool:
             raise ValueError("Некорректные данные диагностики.")
         event[field] = data[field]
+    platform = data.get("platform")
+    if isinstance(platform, str) and platform in PLATFORMS:
+        event["platform"] = platform
     logger.warning(json.dumps(event, separators=(",", ":")))

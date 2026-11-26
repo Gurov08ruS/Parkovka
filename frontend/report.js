@@ -1,10 +1,11 @@
-import { registerDraftEditor, requestMaxCameraAccess, requireAccount, showHistory } from "./app.js";
-import { request } from "./ui.js";
+import { registerDraftEditor, requestMaxCameraAccess, maxCameraSettings, requireAccount, showHistory } from "./app.js";
+import { request, initData, withTimeout } from "./ui.js";
 
 const dialog = document.querySelector("#report-dialog");
 const form = document.querySelector("#report-form");
 const locateButton = document.querySelector("#locate");
 const cameraButton = document.querySelector("#open-camera");
+const cameraSettingsButton = document.querySelector("#camera-settings");
 const detailButton = document.querySelector("#open-detail");
 const removeDetail = document.querySelector("#remove-detail");
 const takeButton = document.querySelector("#take-photo");
@@ -52,6 +53,9 @@ const cameraMessages = new Map([
     ["TypeError", "Не удалось включить камеру в этом браузере"],
     ["MaxAppPermissionDenied", "Разрешите доступ к камере в настройках мини-приложения MAX"],
     ["MaxSystemPermissionDenied", "Разрешите доступ MAX к камере в настройках устройства"],
+    ["MaxPermissionError", "Не удалось получить доступ к камере в MAX. Попробуйте ещё раз"],
+    ["MaxPermissionTimeout", "MAX не ответил на запрос доступа. Проверьте разрешения камеры и попробуйте ещё раз"],
+    ["CameraStreamTimeout", "Камера не ответила. Проверьте разрешения и попробуйте ещё раз"],
 ]);
 
 let session = 0;
@@ -79,12 +83,16 @@ let capturing = false;
 let locating = false;
 let openingCamera = false;
 let saving = false;
+let openCameraSettings;
 
 function deviceFailure(device, stage, code, details = {}) {
-    const inMax = Boolean(window.WebApp || new URLSearchParams(location.hash.slice(1)).has("WebAppData"));
-    const event = { stage, code, secure_context: window.isSecureContext, in_max: inMax, ...details };
+    const inMax = Boolean(initData());
+    const platform = inMax
+        ? window.WebApp?.platform || new URLSearchParams(location.hash.slice(1)).get("WebAppPlatform") || "unknown"
+        : "browser";
+    const event = { stage, code, secure_context: Boolean(window.isSecureContext), in_max: inMax, platform, ...details };
     console.warn("Ошибка устройства", device, event);
-    void request(`/api/diagnostics/${device}`, event).catch(() => {
+    void request(`/api/diagnostics/${device}`, event, { keepalive: true }).catch(() => {
         console.warn("Запись не дошла до серверного журнала.");
     });
 }
@@ -92,6 +100,8 @@ function deviceFailure(device, stage, code, details = {}) {
 function cameraFailure(stage, code, message) {
     cameraStatus.textContent = message;
     cameraViewStatus.textContent = message;
+    openCameraSettings = maxCameraSettings(code);
+    cameraSettingsButton.hidden = !openCameraSettings;
     deviceFailure("camera", stage, code, { photo: photoKind });
 }
 
@@ -160,6 +170,8 @@ function resetReport() {
     clearTimeout(draftTimer);
     window.removeEventListener("beforeunload", protectDraft);
     locating = openingCamera = saving = false;
+    openCameraSettings = undefined;
+    cameraSettingsButton.hidden = true;
     lastCamera = null;
     stopCamera();
     preview.removeAttribute("src");
@@ -255,6 +267,7 @@ async function locate() {
             if (current !== session || saving) return;
             address = result.address;
             if (address) scheduleDraft();
+            else deviceFailure("location", "address", "address_not_found");
         } catch {
             if (current !== session) return;
             deviceFailure("location", "address", "lookup_failed");
@@ -280,10 +293,31 @@ async function locate() {
     }
 }
 
+async function getCameraStream(video) {
+    let expired = false;
+    const pending = navigator.mediaDevices.getUserMedia({ video, audio: false }).then((stream) => {
+        if (expired) stream.getTracks().forEach((track) => track.stop());
+        return stream;
+    });
+    try {
+        return await withTimeout(pending, 25000, "CameraStreamTimeout");
+    } catch (error) {
+        expired = true;
+        throw error;
+    }
+}
+
 async function openCamera(kind) {
     photoKind = kind;
+    openCameraSettings = undefined;
+    cameraSettingsButton.hidden = true;
     if (!window.isSecureContext) {
         cameraFailure("context", "insecure_context", secureContextMessage);
+        return;
+    }
+    const policy = document.permissionsPolicy ?? document.featurePolicy;
+    if (policy?.allowsFeature?.("camera") === false) {
+        cameraFailure("context", "policy_blocked", "Камера заблокирована для этой страницы. Откройте мини-приложение из чата с ботом MAX");
         return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -298,19 +332,23 @@ async function openCamera(kind) {
     cameraStatus.textContent = "Запрашиваем доступ к камере…";
     try {
         const bridgeAccess = requestMaxCameraAccess();
-        if (bridgeAccess) await bridgeAccess;
+        if (bridgeAccess && !(await bridgeAccess)) {
+            deviceFailure("camera", "max_permissions", "MaxBridgeUnavailable", { photo: kind });
+        }
         if (current !== session) return;
         stage = "stream";
-        let activeStream;
-        try {
-            activeStream = await navigator.mediaDevices.getUserMedia({ video: preferredCamera, audio: false });
-        } catch (error) {
-            if (current !== session) return;
-            if (preferredCamera === defaultCamera || !["NotFoundError", "OverconstrainedError"].includes(error?.name)) throw error;
-            preferredCamera = defaultCamera;
-            activeStream = await navigator.mediaDevices.getUserMedia({ video: preferredCamera, audio: false });
+        for (const video of new Set([preferredCamera, defaultCamera, true])) {
+            let activeStream;
+            try {
+                activeStream = await getCameraStream(video);
+            } catch (error) {
+                if (current !== session || video === true || !["NotFoundError", "OverconstrainedError"].includes(error?.name)) throw error;
+                continue;
+            }
+            if (current === session) preferredCamera = video;
+            await showCamera(activeStream, current);
+            break;
         }
-        await showCamera(activeStream, current);
     } catch (error) {
         if (current !== session) return;
         const code = cameraMessages.has(error?.name)
@@ -439,9 +477,10 @@ async function switchCamera() {
         for (const video of choices) {
             let next;
             try {
-                next = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-            } catch {
+                next = await getCameraStream(video);
+            } catch (error) {
                 if (current !== session || document.hidden) return;
+                if (error?.name === "CameraStreamTimeout") throw error;
                 continue;
             }
             const nextDeviceId = next.getVideoTracks()[0]?.getSettings().deviceId;
@@ -455,7 +494,7 @@ async function switchCamera() {
         }
 
         if (activeStream) {
-            await showCamera(await navigator.mediaDevices.getUserMedia({ video: previous, audio: false }), current);
+            await showCamera(await getCameraStream(previous), current);
         }
         if (current !== session) return;
         cameraFailure("switch", "NotFoundError", stream && playButton.hidden
@@ -733,6 +772,14 @@ for (const eventName of ["dragover", "drop"]) {
 locateButton.addEventListener("click", locate);
 cameraButton.addEventListener("click", () => openCamera("overview"));
 detailButton.addEventListener("click", () => openCamera("detail"));
+cameraSettingsButton.addEventListener("click", async () => {
+    try {
+        await openCameraSettings?.();
+    } catch {
+        deviceFailure("camera", "max_permissions", "MaxSettingsError", { photo: photoKind });
+        cameraStatus.textContent = "Не удалось открыть настройки. Проверьте разрешения MAX в настройках телефона";
+    }
+});
 nextStep.addEventListener("click", () => showStep(step + 1));
 skipDetail.addEventListener("click", () => showStep(3));
 previousStep.addEventListener("click", () => showStep(1));

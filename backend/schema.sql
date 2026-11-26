@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     owner_id INTEGER REFERENCES accounts(id),
     submitted_at TEXT,
+    withdrawn_at TEXT,
     CHECK ((latitude IS NULL) = (longitude IS NULL))
 );
 

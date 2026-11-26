@@ -1,10 +1,13 @@
-export async function request(path, body) {
+const MAX_BOT_URL = "https://max.ru/se15128211_bot";
+
+export async function request(path, body, { keepalive = false } = {}) {
     let response;
     try {
         response = await fetch(path, body === undefined ? {} : {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
+            keepalive,
         });
     } catch {
         throw new Error("Не удалось связаться с сервером. Попробуйте ещё раз");
@@ -26,6 +29,21 @@ export async function request(path, body) {
 
 export function initData() {
     return window.WebApp?.initData || new URLSearchParams(location.hash.slice(1)).get("WebAppData");
+}
+
+export function needsMax(session) {
+    return session.mode === "max" && !session.user && !initData();
+}
+
+export async function withTimeout(promise, milliseconds, code) {
+    let timer;
+    try {
+        return await Promise.race([promise, new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new DOMException("", code)), milliseconds);
+        })]);
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 let sessionRequest = null;
@@ -87,6 +105,10 @@ export function panelLink(text, href, primary = false) {
     const link = element("a", text, primary ? "panel-button primary-button" : "panel-button");
     link.href = href;
     return link;
+}
+
+export function maxBotLink() {
+    return panelLink("Перейти в бота MAX", MAX_BOT_URL, true);
 }
 
 export function field(label, name, options = {}) {

@@ -19,8 +19,9 @@ TRANSITIONS = {
     "under_review": {"approved", "rejected"},
 }
 REPORT_QUERY = """
-    SELECT reports.id, reports.status, latitude, longitude, plate_number, plate_source, plate_verification,
-           comment, created_at, submitted_at,
+    SELECT reports.id, CASE WHEN withdrawn_at IS NOT NULL THEN 'withdrawn' ELSE reports.status END AS status,
+           latitude, longitude, plate_number, plate_source, plate_verification,
+           comment, created_at, submitted_at, withdrawn_at,
            address, captured_at, captures.report_id IS NOT NULL AS has_photo,
            detail_photo IS NOT NULL AS has_detail_photo,
            COALESCE(ban_event.account_ban, 0) AS auto_rejected,
@@ -69,7 +70,7 @@ def initialize_database(database):
         for table, columns in (
             ("reports", {
                 "owner_id": "INTEGER REFERENCES accounts(id)", "submitted_at": "TEXT",
-                "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT",
+                "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT", "withdrawn_at": "TEXT",
             }),
             ("report_events", {
                 "account_ban": "INTEGER NOT NULL DEFAULT 0 CHECK (account_ban IN (0, 1))",
@@ -208,6 +209,7 @@ def save_capture(connection, data, owner_id, *, draft=False):
 def report_scope(account, reviewer):
     if reviewer:
         return ("""(reports.submitted_at IS NOT NULL OR ban_event.id IS NOT NULL)
+                   AND reports.withdrawn_at IS NULL
                    AND reports.owner_id IN (SELECT id FROM accounts WHERE source = ?)""",
                 account["source"])
     return "reports.owner_id = ?", account["id"]
@@ -215,9 +217,10 @@ def report_scope(account, reviewer):
 
 def account_report_stats(connection, account_id):
     return dict(connection.execute(
-        """SELECT COUNT(*) FILTER (WHERE status = 'approved') AS approved,
-                  COUNT(*) FILTER (WHERE status = 'rejected') AS rejected
-           FROM reports WHERE owner_id = ? AND status IN ('approved', 'rejected')""",
+        """SELECT COUNT(*) FILTER (WHERE status = 'approved' AND withdrawn_at IS NULL) AS approved,
+                  COUNT(*) FILTER (WHERE status = 'rejected' AND withdrawn_at IS NULL) AS rejected,
+                  COUNT(withdrawn_at) AS withdrawn
+           FROM reports WHERE owner_id = ?""",
         (account_id,),
     ).fetchone())
 
@@ -268,20 +271,37 @@ def report_detail(connection, identifier, account, reviewer):
         "SELECT status, note, occurred_at FROM report_events WHERE report_id = ? ORDER BY id",
         (identifier,),
     )]
+    if report["withdrawn_at"] is not None:
+        report["events"].append({"status": "withdrawn", "occurred_at": report["withdrawn_at"], "note": ""})
     return report
+
+
+def withdraw_report(connection, identifier, account):
+    connection.execute("BEGIN IMMEDIATE")
+    ensure_active(connection, account["id"])
+    report = visible_report(connection, identifier, account, reviewer=False)
+    if report["status"] == "withdrawn":
+        return report_detail(connection, identifier, account, reviewer=False)
+    if report["status"] not in TRANSITIONS:
+        raise ApiError(HTTPStatus.CONFLICT, "Можно отозвать только обращение, по которому ещё нет решения.")
+    connection.execute(
+        "UPDATE reports SET withdrawn_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        (identifier,),
+    )
+    return report_detail(connection, identifier, account, reviewer=False)
 
 
 def reject_banned_reports(connection, author_id, reviewer_id, ban_report_id=None):
     connection.execute(
         """INSERT INTO report_events (report_id, actor_id, status, note, account_ban, ban_report_id)
            SELECT reports.id, ?, 'rejected', ?, 1, ? FROM reports
-           WHERE reports.owner_id = ? AND NOT EXISTS (
+           WHERE reports.owner_id = ? AND reports.withdrawn_at IS NULL AND NOT EXISTS (
                SELECT 1 FROM report_events WHERE report_id = reports.id AND account_ban = 1
            )""",
         (reviewer_id, BAN_REJECTION_NOTE, ban_report_id, author_id),
     )
     connection.execute(
-        "UPDATE reports SET status = 'rejected' WHERE owner_id = ? AND status <> 'rejected'",
+        "UPDATE reports SET status = 'rejected' WHERE owner_id = ? AND status <> 'rejected' AND withdrawn_at IS NULL",
         (author_id,),
     )
 

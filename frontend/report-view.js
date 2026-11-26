@@ -8,6 +8,7 @@ export const statuses = {
     under_review: "На проверке",
     approved: "Проверено",
     rejected: "Отклонено",
+    withdrawn: "Отозвано",
 };
 
 function dateLabel(value) {
@@ -44,7 +45,8 @@ export function reviewPageUrl(identifier) {
 
 export function decisionStats(stats) {
     const list = element("dl", "", "decision-stats");
-    for (const [key, label] of [["approved", "Принято"], ["rejected", "Отклонено"]]) {
+    for (const [key, label] of [["approved", "Принято"], ["rejected", "Отклонено"], ["withdrawn", "Отозвано"]]) {
+        if (!Object.hasOwn(stats, key)) continue;
         const item = element("div");
         item.append(element("dt", label), element("dd", stats[key], `status-${key}`));
         list.append(item);

@@ -66,13 +66,11 @@ def clean_text(value, label, limit, *, required=False):
     return value
 
 
-def user_fields(data, *, test):
-    max_id, first_name, last_name = data
-    if not isinstance(max_id, str) or not MAX_ID.fullmatch(max_id):
-        raise ValueError("ID MAX должен содержать от 1 до 19 цифр и начинаться с ненулевой цифры.")
-    first_name = clean_text(first_name, "Имя", 80, required=True)
-    last_name = clean_text(last_name, "Фамилия", 80, required=test)
-    return max_id, first_name, last_name
+def profile_names(first_name, last_name, *, last_required=False):
+    return (
+        clean_text(first_name, "Имя", 80, required=True),
+        clean_text(last_name, "Фамилия", 80, required=last_required),
+    )
 
 
 def verify_max(init_data, token):
@@ -98,7 +96,10 @@ def verify_max(init_data, token):
         raise ValueError("Некорректные данные профиля MAX.") from None
     if not -60 <= time.time() - issued <= SIGNATURE_SECONDS:
         raise ValueError("Срок входа истёк. Откройте мини-приложение заново в MAX.")
-    fields = user_fields((str(user["id"]), user.get("first_name"), user.get("last_name") or ""), test=False)
+    max_id = str(user["id"])
+    if not MAX_ID.fullmatch(max_id):
+        raise ValueError("Некорректный ID пользователя MAX.")
+    fields = (max_id, *profile_names(user.get("first_name"), user.get("last_name") or ""))
     photo_url = user.get("photo_url")
     if not isinstance(photo_url, str) or len(photo_url) > 2048:
         photo_url = None
@@ -131,6 +132,12 @@ def session_token_hash(token):
 
 def create_session(connection, source, max_id, old_token):
     connection.execute("BEGIN IMMEDIATE")
+    current = session_account(connection, old_token, source)
+    if current is not None and (max_id is None or current["max_id"] == max_id):
+        ensure_active(connection, current["id"])
+        return None, current
+    if max_id is None:
+        max_id = f"test-{secrets.token_hex(16)}"
     connection.execute(
         "INSERT INTO accounts (source, max_id) VALUES (?, ?) ON CONFLICT (source, max_id) DO NOTHING",
         (source, max_id),
@@ -139,9 +146,6 @@ def create_session(connection, source, max_id, old_token):
         "SELECT id FROM accounts WHERE source = ? AND max_id = ?", (source, max_id),
     ).fetchone()
     ensure_active(connection, account["id"])
-    current = session_account(connection, old_token, source)
-    if current is not None and current["id"] == account["id"]:
-        return None, current
     now = int(time.time())
     token = secrets.token_urlsafe(32)
     connection.execute("DELETE FROM sessions WHERE expires_at <= ? OR token_hash = ?", (now, old_token))

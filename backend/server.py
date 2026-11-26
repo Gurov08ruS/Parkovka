@@ -22,7 +22,7 @@ from urllib.request import Request, urlopen
 
 from accounts import (
     AccountBanned, COOKIE_NAME, MAX_COOKIE_NAME, SessionProfiles, clean_text, cookie_token, create_session,
-    ensure_active, session_account, session_token_hash, user_fields, verify_max,
+    ensure_active, profile_names, session_account, session_token_hash, verify_max,
 )
 from device_logs import log_camera_error, log_location_error
 from max_bot import WEBHOOK_PATH, MaxApiError, MaxBot, webhook_url
@@ -55,7 +55,7 @@ from database import DatabaseKeyError, database_has_data, migrate_plaintext, sql
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
-    reviewer_decision_stats, save_capture, set_author_ban,
+    reviewer_decision_stats, save_capture, set_author_ban, withdraw_report,
 )
 from server_logs import ServerLogs
 
@@ -67,6 +67,11 @@ REVIEW_PATH = "/api/review"
 REPORT_ROUTE = re.compile(r"/api/(reports|review)/([1-9][0-9]{0,18})(?:/photos/(overview|detail))?")
 STATUS_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/status")
 BAN_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/author-ban")
+WITHDRAW_ROUTE = re.compile(r"/api/reports/([1-9][0-9]{0,18})/withdraw")
+DEVICE_DIAGNOSTICS = {
+    "/api/diagnostics/camera": ("camera", log_camera_error),
+    "/api/diagnostics/location": ("location", log_location_error),
+}
 MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
@@ -149,14 +154,14 @@ class AppHandler(SimpleHTTPRequestHandler):
         ".webp": "image/webp",
     }
 
-    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, max_bot=None, **kwargs):
+    def __init__(self, *args, database, bot_token, reviewer_key, secure_cookie, test_mode=False, max_bot=None, **kwargs):
         self.database = database
         self.bot_token = bot_token
         self.max_bot = max_bot
         self.reviewer_key = reviewer_key
         self.review_grant = hashlib.sha256(reviewer_key.encode()).hexdigest() if reviewer_key else None
         self.secure_cookie = secure_cookie
-        self.source = "max" if self.bot_token else "test"
+        self.source = "test" if test_mode else "max"
         super().__init__(*args, directory=FRONTEND, **kwargs)
 
     def log_message(self, format, *args):
@@ -217,7 +222,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         if account is not None:
             token_hash = token_hash or session_token_hash(self.request_session_token())
             profile = self.server.session_profiles.get(token_hash)
-            first_name, last_name, photo_url = profile or ("", "", None)
+            default_name = ("Тестовый", "пользователь", None) if self.source == "test" else ("", "", None)
+            first_name, last_name, photo_url = profile or default_name
             user = {
                 "max_id": account["max_id"], "first_name": first_name, "last_name": last_name,
                 "photo_url": photo_url, "reviewer": self.is_reviewer(account),
@@ -321,20 +327,27 @@ class AppHandler(SimpleHTTPRequestHandler):
         path = self.path.partition("?")[0]
         status_route = STATUS_ROUTE.fullmatch(path)
         ban_route = BAN_ROUTE.fullmatch(path)
+        withdraw_route = WITHDRAW_ROUTE.fullmatch(path)
+        diagnostic = DEVICE_DIAGNOSTICS.get(path)
         if path not in {
             "/api/session", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
-            "/api/diagnostics/camera", "/api/diagnostics/location", REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH,
-        } and status_route is None and ban_route is None:
+            REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH,
+        } and not (status_route or ban_route or withdraw_route or diagnostic):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
             if path == WEBHOOK_PATH:
                 self.receive_max_update()
                 return
+            if diagnostic:
+                device, record = diagnostic
+                record(getattr(self.server.logs, device), self.read_json(1024))
+                self.send_json(HTTPStatus.OK, {"logged": True})
+                return
             limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH) else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
-                self.post_api(path, status_route, ban_route, data, connection)
+                self.post_api(path, status_route, ban_route, withdraw_route, data, connection)
         except ApiError as error:
             self.send_error(error.status, str(error))
         except AccountBanned as error:
@@ -357,19 +370,21 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.max_bot.handle_update(self.read_json(MAX_WEBHOOK_BODY_BYTES))
         self.send_json(HTTPStatus.OK, {"ok": True})
 
-    def post_api(self, path, status_route, ban_route, data, connection):
+    def post_api(self, path, status_route, ban_route, withdraw_route, data, connection):
         old_token = self.request_session_token()
         token_hash = session_token_hash(old_token)
         if path == "/api/session":
-            photo_url = None
-            if self.bot_token:
+            profile = None
+            max_id = None
+            if self.source == "max":
+                if not self.bot_token:
+                    raise ApiError(HTTPStatus.SERVICE_UNAVAILABLE, "Вход через MAX пока недоступен.")
                 try:
                     fields, photo_url = verify_max(data.get("init_data"), self.bot_token)
                 except ValueError as error:
                     raise ApiError(HTTPStatus.UNAUTHORIZED, str(error)) from error
-            else:
-                fields = user_fields((data.get("max_id"), data.get("first_name"), data.get("last_name")), test=True)
-            max_id, first_name, last_name = fields
+                max_id, first_name, last_name = fields
+                profile = (first_name, last_name, photo_url)
             with connection:
                 token, account = create_session(connection, self.source, max_id, token_hash)
             profiles = self.server.session_profiles
@@ -380,7 +395,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             if token is not None or self.source == "max":
                 max_age = max(0, account["expires_at"] - int(time.time()))
                 headers = (self.session_cookie(token or old_token, max_age),)
-            profiles.put(token_hash, account["expires_at"], (first_name, last_name, photo_url))
+            if profile:
+                profiles.put(token_hash, account["expires_at"], profile)
             self.send_json(HTTPStatus.OK, self.session_data(account, token_hash), *headers)
             return
 
@@ -395,20 +411,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None)
-        if path == "/api/diagnostics/camera":
-            log_camera_error(self.server.logs.camera, data)
-            self.send_json(HTTPStatus.OK, {"logged": True})
-            return
-        if path == "/api/diagnostics/location":
-            log_location_error(self.server.logs.location, data)
-            self.send_json(HTTPStatus.OK, {"logged": True})
-            return
-
         if path == "/api/profile":
             if self.source == "max":
                 raise ApiError(HTTPStatus.FORBIDDEN, "Имя, фамилия и фото берутся из профиля MAX.")
-            _, first_name, last_name = user_fields(
-                (account["max_id"], data.get("first_name"), data.get("last_name")), test=True,
+            first_name, last_name = profile_names(
+                data.get("first_name"), data.get("last_name"), last_required=True,
             )
             self.server.session_profiles.put(token_hash, account["expires_at"], (first_name, last_name, None))
             self.send_json(HTTPStatus.OK, self.session_data(account))
@@ -437,13 +444,17 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"address": address})
             return
 
-        if status_route is not None or ban_route is not None:
-            identifier = int((status_route or ban_route)[1])
+        if status_route or ban_route or withdraw_route:
+            identifier = int((status_route or ban_route or withdraw_route)[1])
             if identifier > MAX_REPORT_ID:
                 raise ApiError(HTTPStatus.NOT_FOUND, "Обращение не найдено.")
             with connection:
-                report = (change_status(connection, identifier, account, data) if status_route
-                          else set_author_ban(connection, identifier, account, data))
+                if status_route:
+                    report = change_status(connection, identifier, account, data)
+                elif ban_route:
+                    report = set_author_ban(connection, identifier, account, data)
+                else:
+                    report = withdraw_report(connection, identifier, account)
             self.send_json(HTTPStatus.OK, report)
             return
 
@@ -470,6 +481,7 @@ def main():
     parser.add_argument("--cert", type=Path, help="Сертификат HTTPS в формате PEM")
     parser.add_argument("--key", type=Path, help="Ключ сертификата HTTPS")
     parser.add_argument("--bot", action="store_true", help="Включить обработку событий бота MAX")
+    parser.add_argument("--test", action="store_true", help="Разрешить вход в тестовый аккаунт без MAX")
     parser.add_argument("--register-max-webhook", action="store_true", help="Подключить вебхук MAX и завершить работу")
     options = parser.parse_args()
     if (options.cert is None) != (options.key is None):
@@ -504,7 +516,7 @@ def main():
 
     reviewer_key = os.environ.get("STUKACH_REVIEW_KEY")
     generated_key = None
-    if not bot_token and not reviewer_key:
+    if options.test and not reviewer_key:
         reviewer_key = generated_key = secrets.token_urlsafe(18)
 
     database_directory = options.db.resolve().parent
@@ -531,7 +543,7 @@ def main():
         raise SystemExit(f"Не удалось открыть базу {options.db}: {error}") from None
     handler = partial(
         AppHandler, database=options.db, bot_token=bot_token, reviewer_key=reviewer_key, max_bot=max_bot,
-        secure_cookie=tls is not None or bool(bot_token),
+        secure_cookie=tls is not None, test_mode=options.test,
     )
     try:
         server = AppServer((options.host, options.port), handler, logs=logs)

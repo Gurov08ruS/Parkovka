@@ -1,4 +1,4 @@
-import { request, initData, loadSession, logoutSession, element, statusMessage, button, submitButton, field, formHandler, panelLink } from "./ui.js";
+import { request, initData, needsMax, withTimeout, loadSession, logoutSession, element, statusMessage, button, submitButton, field, formHandler, panelLink, maxBotLink } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl } from "./report-view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -6,6 +6,8 @@ const accountDialog = $("account-dialog");
 const accountForm = $("account-form");
 const accountMessage = $("account-message");
 const accountSubmit = $("account-submit");
+const maxLogin = $("max-login");
+const browserNotice = $("browser-max-notice");
 const panel = $("panel-dialog");
 const panelContent = $("tab-content");
 const tabTitles = { home: "Главная", history: "Мои обращения", achievements: "Мои достижения", profile: "Мой аккаунт" };
@@ -17,6 +19,9 @@ let afterLogin = null;
 let panelVersion = 0;
 let bridge;
 let editDraft;
+
+browserNotice.append(maxBotLink());
+maxLogin.append(maxBotLink());
 
 export function registerDraftEditor(editor) {
     editDraft = editor;
@@ -40,10 +45,10 @@ function showSessionError(content, error, retry) {
 
 function setSession(data) {
     session = data;
-    updateHeaderAvatar(data.user);
+    browserNotice.hidden = !needsMax(data);
     if (data.mode === "max" && initData() && !bridge) {
         bridge = new Promise((resolve) => {
-            if (window.WebApp) {
+            if (window.WebApp?.PermissionsManager) {
                 resolve(window.WebApp);
                 return;
             }
@@ -56,54 +61,45 @@ function setSession(data) {
     }
 }
 
-function updateHeaderAvatar(user) {
-    const header = $("header-profile");
-    const avatar = header?.querySelector("img");
-    const icon = header?.querySelector("svg");
-    if (!avatar || !icon) return;
-    avatar.onload = null;
-    avatar.onerror = null;
-    avatar.hidden = true;
-    icon.hidden = false;
-    avatar.removeAttribute("src");
-    if (user?.photo_url) {
-        avatar.onload = () => { avatar.hidden = false; icon.hidden = true; };
-        avatar.onerror = () => { avatar.hidden = true; icon.hidden = false; };
-        avatar.src = user.photo_url;
-    }
-}
-
 export function requestMaxCameraAccess() {
     return bridge ? requestBridgeCameraAccess() : null;
 }
 
 async function requestBridgeCameraAccess() {
-    const app = await Promise.race([bridge, new Promise((resolve) => setTimeout(() => resolve(null), 2000))]);
+    const app = await withTimeout(bridge, 4000, "MaxBridgeUnavailable").catch(() => null);
     const manager = app?.PermissionsManager;
-    if (!manager) return;
-    if (!manager.isInited) await manager.init();
+    if (!manager || typeof manager.requestAccess !== "function") return false;
+    return withTimeout(checkMaxCameraPermission(manager), 30000, "MaxPermissionTimeout");
+}
+
+async function checkMaxCameraPermission(manager) {
+    let camera;
     try {
-        await manager.requestAccess(["camera"], "Для съёмки знака и автомобиля");
+        if (!manager.isInited) await manager.init();
+        ({ camera } = (await manager.requestAccess(["camera"], "Для съёмки знака и автомобиля")) || {});
     } catch (error) {
-        const code = error?.error?.code || "";
-        if (code.endsWith("app_permission_denied")) {
-            throw new DOMException("Разрешите доступ к камере в настройках мини-приложения MAX", "MaxAppPermissionDenied");
-        }
-        if (code.endsWith("system_permission_denied")) {
-            throw new DOMException("Разрешите доступ MAX к камере в настройках устройства", "MaxSystemPermissionDenied");
-        }
-        throw error;
+        const code = String(error?.error?.code || error?.code || "");
+        if (code.endsWith("app_permission_denied")) throw new DOMException("", "MaxAppPermissionDenied");
+        if (code.endsWith("system_permission_denied")) throw new DOMException("", "MaxSystemPermissionDenied");
+        throw new DOMException("", "MaxPermissionError");
     }
+    if (camera?.appAccessGranted === false) throw new DOMException("", "MaxAppPermissionDenied");
+    if (camera?.systemAccessGranted === false) throw new DOMException("", "MaxSystemPermissionDenied");
+    return true;
+}
+
+export function maxCameraSettings(code) {
+    const manager = window.WebApp?.PermissionsManager;
+    if (code === "MaxAppPermissionDenied") return manager?.openMaxSettings?.bind(manager);
+    if (code === "MaxSystemPermissionDenied") return manager?.openSystemSettings?.bind(manager);
 }
 
 function openLogin(action) {
     const test = session.mode === "test";
-    const testFields = $("test-login");
-    testFields.hidden = !test;
-    for (const input of testFields.querySelectorAll("input")) input.disabled = !test;
-    $("max-login").hidden = test || Boolean(initData());
-    accountSubmit.textContent = test ? "Войти" : "Войти через MAX";
-    accountSubmit.disabled = !test && !initData();
+    const outsideMax = needsMax(session);
+    maxLogin.hidden = !outsideMax;
+    accountSubmit.textContent = test ? "Войти в тестовом режиме" : "Войти через MAX";
+    accountSubmit.hidden = accountSubmit.disabled = outsideMax;
     accountMessage.textContent = "";
     afterLogin = action;
     if (currentTab === "home" || $("report-dialog").open) {
@@ -139,12 +135,10 @@ export async function requireAccount(action) {
 
 accountForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (loginRequest) return;
+    if (loginRequest || !session || needsMax(session)) return;
     const action = afterLogin;
     const version = panelVersion;
-    const input = session.mode === "test"
-        ? Object.fromEntries(new FormData(accountForm))
-        : { init_data: initData() };
+    const input = session.mode === "test" ? {} : { init_data: initData() };
     accountSubmit.disabled = true;
     accountMessage.textContent = "Входим…";
     try {
@@ -160,7 +154,7 @@ accountForm.addEventListener("submit", async (event) => {
         if (version === panelVersion && action === afterLogin) accountMessage.textContent = error.message;
     } finally {
         loginRequest = null;
-        accountSubmit.disabled = session.mode === "max" && !initData();
+        accountSubmit.disabled = needsMax(session);
     }
 });
 accountDialog.addEventListener("close", () => {
@@ -205,8 +199,9 @@ function showProfile() {
     }
     const text = element("div");
     const name = user ? `${user.first_name} ${user.last_name}`.trim() || "Пользователь MAX" : "Гость";
-    text.append(element("strong", name),
-        element("p", user ? `ID MAX: ${user.max_id}` : "Войдите, чтобы отправлять обращения"));
+    text.append(element("strong", name), element("p", user
+        ? (session.mode === "test" ? "Тестовый аккаунт" : `ID MAX: ${user.max_id}`)
+        : "Войдите, чтобы отправлять обращения"));
     identity.append(avatar, text);
     panelContent.append(identity);
     const menu = element("div", "", "profile-menu");
@@ -256,7 +251,6 @@ function showEditProfile() {
     const profile = element("form", "", "panel-stack");
     const profileMessage = statusMessage();
     profile.append(
-        element("p", `ID MAX: ${user.max_id}`),
         field("Имя", "first_name", { value: user.first_name, maxLength: 80, required: true }),
         field("Фамилия", "last_name", { value: user.last_name, maxLength: 80, required: true }),
         submitButton("Сохранить профиль"),
@@ -342,6 +336,18 @@ async function showDetails(identifier, filter = "sent") {
         if (report.capture_id && editDraft) {
             panelContent.append(button("Продолжить черновик", () => editDraft(report), true));
         }
+        if (["pending", "under_review"].includes(report.status)) {
+            const confirmation = element("details", "", "withdraw-report");
+            const form = element("form", "", "panel-stack");
+            const feedback = statusMessage();
+            form.append(element("p", "После отзыва обращение снимут с проверки. Оно останется в вашей истории."),
+                submitButton("Подтвердить отзыв"), feedback);
+            formHandler(form, feedback, `${path}/withdraw`, () => {
+                if (activePanel(version)) return showDetails(identifier, filter);
+            });
+            confirmation.append(element("summary", "Отозвать обращение"), form);
+            panelContent.append(confirmation);
+        }
     } catch (error) {
         if (!activePanel(version)) return;
         message.textContent = error.message;
@@ -353,15 +359,8 @@ function showAbout() {
     const content = openModalPanel("О проекте");
     content.append(
         element("p", "«ЧУЖОЕ МЕСТО» помогает сохранять доступность парковочных мест для людей с инвалидностью"),
-        element("h3", "Как отправить обращение"),
+        element("p", "Результат внутренней проверки описывает качество и содержание материалов"),
     );
-    const steps = element("ol", "", "report-events");
-    for (const step of [
-        "Разрешите геолокацию и проверьте, что адрес соответствует месту",
-        "Снимите автомобиль, госномер и парковочный знак. Если всё хорошо видно на одном кадре, второго не нужно",
-        "Отправьте материалы на внутреннюю проверку и смотрите решение в разделе «Мои обращения»",
-    ]) steps.append(element("li", step));
-    content.append(steps, element("p", "Результат внутренней проверки описывает качество и содержание материалов"));
 }
 
 function tabFromUrl() {
@@ -375,6 +374,7 @@ function renderTab(tab, identifier, filter = "sent") {
     const direction = Math.sign(tabIndex - tabs.indexOf(currentTab));
     document.querySelector(".tab-bar").style.setProperty("--indicator-offset", `${tabIndex * 100}%`);
     currentTab = tab;
+    $("tab-screen").dataset.tab = tab;
     afterLogin = null;
     if (accountDialog.open) accountDialog.close();
     if (panel.open) panel.close();
@@ -448,8 +448,6 @@ for (const tab of Object.keys(tabTitles)) {
 }
 window.addEventListener("popstate", renderLocation);
 $("open-about").addEventListener("click", showAbout);
-$("home-reports").addEventListener("click", () => navigate("history"));
-$("header-profile")?.addEventListener("click", () => navigate("profile"));
 const parkingWarning = $("parking-warning");
 let warningClickAnimation;
 parkingWarning.addEventListener("click", () => {
