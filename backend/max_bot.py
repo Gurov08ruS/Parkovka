@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 import ssl
 from collections import OrderedDict
 from threading import Lock
@@ -162,7 +163,31 @@ class MaxBot:
             "attachments": [{"type": "inline_keyboard", "payload": {"buttons": [[button]]}}],
         })
 
-    def send_report_notification(self, user_id, report_id, status, note):
+    def upload_report_photo(self, photo):
+        if len(photo) > 50 * 1024 * 1024:
+            raise MaxApiError("Фото превышает ограничение MAX в 50 МБ.")
+        destination = self.api("/uploads?type=image", {}).get("url")
+        parsed = urlsplit(destination or "")
+        if parsed.scheme != "https" or parsed.hostname != "iu.oneme.ru" or parsed.username or parsed.password:
+            raise MaxApiError("MAX вернул некорректный адрес загрузки фото.")
+        boundary = secrets.token_hex(24)
+        extension = "png" if photo.startswith(b"\x89PNG") else "jpg"
+        mime = "image/png" if extension == "png" else "image/jpeg"
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="data"; filename="photo.{extension}"\r\n'
+                f'Content-Type: {mime}\r\n\r\n').encode() + photo + f"\r\n--{boundary}--\r\n".encode()
+        request = Request(destination, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        request.add_unredirected_header("Authorization", self.token)
+        try:
+            with urlopen(request, timeout=60, context=self.tls) as response:
+                result = json.loads(response.read(1024 * 1024))
+            token = next(iter(result["photos"].values()))["token"]
+            if not isinstance(token, str) or not token:
+                raise ValueError
+        except (OSError, ValueError, KeyError, TypeError, StopIteration):
+            raise MaxApiError("Не удалось загрузить фотографию в MAX.") from None
+        return {"type": "image", "payload": {"token": token}}
+
+    def send_report_notification(self, user_id, report_id, status, note, report):
         result = {
             "pending": "отправлено на проверку",
             "approved": "принято по итогам проверки",
@@ -171,7 +196,23 @@ class MaxBot:
         text = f"Обращение №{report_id} {result}."
         if status == "rejected" and note:
             text += f"\n\nПричина: {note}"
-        self.api(f"/messages?{urlencode({'user_id': user_id})}", {"text": text})
+        for label, value in (("Адрес", report["address"]), ("Госномер", " ".join(filter(None, (report["plate_number"], report["plate_region"])))),
+                             ("Время съёмки", report["captured_at"]), ("Комментарий", report["comment"])):
+            if value:
+                text += f"\n{label}: {value}"
+        if report["latitude"] is not None:
+            text += f"\nКоординаты: {report['latitude']}, {report['longitude']}"
+        if status == "approved" and note:
+            text += f"\nРешение проверяющего: {note}"
+        if self.miniapp_url is None:
+            username = self.api("/me").get("username")
+            if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]+", username):
+                raise MaxApiError("MAX API не вернул публичный никнейм бота.")
+            self.miniapp_url = f"https://max.ru/{username}?startapp"
+        button = {"type": "link", "text": "Открыть обращение", "url": f"{self.miniapp_url}=report_{report_id}"}
+        attachments = [self.upload_report_photo(photo) for photo in (report["photo"], report["detail_photo"]) if photo]
+        attachments.append({"type": "inline_keyboard", "payload": {"buttons": [[button]]}})
+        self.api(f"/messages?{urlencode({'user_id': user_id})}", {"text": text, "attachments": attachments})
 
     def handle_update(self, update):
         recipient = welcome_recipient(update)

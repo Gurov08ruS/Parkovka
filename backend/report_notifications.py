@@ -8,10 +8,13 @@ from max_bot import MaxApiError
 
 def deliver_next(connection, bot, logger):
     notification = connection.execute(
-        """SELECT queued.event_id, queued.attempts, report_events.report_id, report_events.status, note, accounts.max_id
+        """SELECT queued.event_id, queued.attempts, report_events.report_id, report_events.status, note, accounts.max_id,
+                  reports.latitude, reports.longitude, reports.plate_number, reports.plate_region, reports.comment,
+                  captures.address, captures.captured_at, captures.photo, captures.detail_photo
            FROM max_report_notifications AS queued
            JOIN report_events ON report_events.id = queued.event_id
            JOIN reports ON reports.id = report_events.report_id
+           LEFT JOIN report_captures AS captures ON captures.report_id = reports.id
            JOIN accounts ON accounts.id = reports.owner_id
            WHERE queued.next_attempt <= ? AND NOT EXISTS (
                SELECT 1 FROM report_events AS previous
@@ -27,10 +30,10 @@ def deliver_next(connection, bot, logger):
     event_id = notification["event_id"]
     try:
         bot.send_report_notification(notification["max_id"], notification["report_id"],
-                                     notification["status"], notification["note"])
+                                     notification["status"], notification["note"], notification)
     except MaxApiError as error:
         logger.warning("Не удалось отправить уведомление MAX об обращении №%s: %s", notification["report_id"], error)
-        if error.status not in {400, 403, 404, 410, 422}:
+        if error.status not in {403, 404, 410}:
             delay = min(3600, 10 * 2 ** min(notification["attempts"], 9))
             with connection:
                 connection.execute(

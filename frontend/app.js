@@ -587,6 +587,12 @@ animateSceneButton($("parking-car"), [
 loadSession().then((data) => {
     if (session === null) setSession(data);
     if (data.camera_login && currentTab === "home") $("open-report").click();
+    const params = new URLSearchParams(location.hash.slice(1));
+    const start = window.WebApp?.initDataUnsafe?.start_param
+        || new URLSearchParams(params.get("WebAppData") || "").get("start_param")
+        || params.get("WebAppStartParam") || new URLSearchParams(location.search).get("WebAppStartParam");
+    const match = /^report_(0|[1-9][0-9]{0,18})$/.exec(start || "");
+    if (match && data.user) showHistory(match[1]);
 }).catch(() => {});
 if (tabFromUrl() !== "home") renderLocation();
 void showSiteVersion($("site-version"));
