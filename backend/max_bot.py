@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import re
 import ssl
 from collections import OrderedDict
 from threading import Lock
@@ -15,10 +16,11 @@ MAX_API = "https://platform-api2.max.ru"
 WEBHOOK_PATH = "/api/max/webhook"
 UPDATE_TYPES = ("bot_started", "message_created")
 WELCOME_MESSAGE = (
-    "Привет! Это «Чужое место»\n\n"
-    "Заметили возможное нарушение на парковочном месте для людей с инвалидностью? "
-    "Сделайте фото, укажите место и отправьте обращение на проверку\n\n"
-    "Чтобы начать, нажмите «Открыть приложение»"
+    "Здравствуйте! Это «Чужое место» — сервис доступной среды.\n\n"
+    "Если вы заметили возможное нарушение на парковочном месте для людей с инвалидностью, "
+    "откройте мини-приложение, сфотографируйте автомобиль и парковочный знак, "
+    "проверьте адрес и отправьте обращение на проверку.\n\n"
+    "Бот сообщит, когда обращение отправится на проверку и когда будет принято решение."
 )
 
 
@@ -80,7 +82,7 @@ class MaxBot:
         except OSError:
             raise MaxApiError("Не удалось загрузить сертификаты из PARKOVKA_MAX_CA_FILE.") from None
         self.secret = hmac.new(token.encode(), b"Stukach MAX webhook v1", hashlib.sha256).hexdigest()
-        self.bot_id = None
+        self.miniapp_url = None
         self.lock = Lock()
         self.sent = OrderedDict()
         self.sending = set()
@@ -149,12 +151,12 @@ class MaxBot:
             raise MaxApiError("MAX API не подтвердил подписку.")
 
     def send_welcome(self, user_id):
-        if self.bot_id is None:
-            bot_id = self.api("/me").get("user_id")
-            if type(bot_id) is not int or bot_id <= 0:
-                raise MaxApiError("MAX API не вернул идентификатор бота.")
-            self.bot_id = bot_id
-        button = {"type": "open_app", "text": "Открыть приложение", "contact_id": self.bot_id}
+        if self.miniapp_url is None:
+            username = self.api("/me").get("username")
+            if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]+", username):
+                raise MaxApiError("MAX API не вернул публичный никнейм бота.")
+            self.miniapp_url = f"https://max.ru/{username}?startapp"
+        button = {"type": "link", "text": "Открыть приложение", "url": self.miniapp_url}
         self.api(f"/messages?{urlencode({'user_id': user_id})}", {
             "text": WELCOME_MESSAGE,
             "attachments": [{"type": "inline_keyboard", "payload": {"buttons": [[button]]}}],
