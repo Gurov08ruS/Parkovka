@@ -78,13 +78,14 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
+VERSION = "0.1.0"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
 FRONTEND = Path(__file__).parent.parent / "frontend"
 
 
-def app_version():
+def git_commit_id():
     try:
         result = subprocess.run(
             ["git", "-C", str(FRONTEND.parent), "rev-parse", "--short", "HEAD"],
@@ -92,8 +93,8 @@ def app_version():
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    version = result.stdout.strip()
-    return version if re.fullmatch(r"[0-9a-f]{7,40}", version) else None
+    commit = result.stdout.strip()
+    return commit if re.fullmatch(r"[0-9a-f]{7,40}", commit) else None
 
 
 def port_owners(port):
@@ -147,7 +148,7 @@ class AppServer(ThreadingHTTPServer):
         self.session_profiles = SessionProfiles()
         self.max_profiles = SessionProfiles()
         self.camera_handoffs = SessionProfiles(limit=1024)
-        self.version = app_version()
+        self.commit_id = git_commit_id()
         super().__init__(*args, **kwargs)
 
     def server_bind(self):
@@ -301,7 +302,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/version":
             self.send_json(HTTPStatus.OK, {
-                "version": self.server.version, "bot": self.max_bot is not None, "test": self.source == "test",
+                "version": VERSION, "commit": self.server.commit_id,
+                "bot": self.max_bot is not None, "test": self.source == "test",
             })
             return
         try:

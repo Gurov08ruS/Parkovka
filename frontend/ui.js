@@ -37,8 +37,8 @@ export function needsMax(session) {
 
 export async function showSiteVersion(footer) {
     try {
-        const { version, bot, test } = await request("/api/version");
-        const labels = [version ? `Версия ${version}` : "Версия неизвестна"];
+        const { version, commit, bot, test } = await request("/api/version");
+        const labels = [`Версия ${version}${commit ? ` (${commit})` : ""}`];
         if (!bot) labels.push("без бота");
         if (test) labels.push("тестовый режим");
         footer.textContent = labels.join(" · ");
