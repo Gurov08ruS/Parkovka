@@ -53,6 +53,7 @@ except ImportError as error:
 
 from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
 from plates import LOCATION_CODES, normalize_region
+from report_notifications import report_notifications
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft, delete_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
@@ -65,11 +66,12 @@ REPORTS_PATH = "/api/reports"
 CAPTURE_PATH = "/api/reports/capture"
 DRAFT_CAPTURE_PATH = f"{CAPTURE_PATH}/draft"
 REVIEW_PATH = "/api/review"
-REPORT_ROUTE = re.compile(r"/api/(reports|review)/([1-9][0-9]{0,18})(?:/photos/(overview|detail))?")
-STATUS_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/status")
-BAN_ROUTE = re.compile(r"/api/review/([1-9][0-9]{0,18})/author-ban")
-WITHDRAW_ROUTE = re.compile(r"/api/reports/([1-9][0-9]{0,18})/withdraw")
-DELETE_DRAFT_ROUTE = re.compile(r"/api/reports/([1-9][0-9]{0,18})/delete-draft")
+REPORT_ID = r"(0|[1-9][0-9]{0,18})"
+REPORT_ROUTE = re.compile(rf"/api/(reports|review)/{REPORT_ID}(?:/photos/(overview|detail))?")
+STATUS_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/status")
+BAN_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/author-ban")
+WITHDRAW_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/withdraw")
+DELETE_DRAFT_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/delete-draft")
 CAMERA_TICKET = re.compile(r"[A-Za-z0-9_-]{43}")
 DEVICE_DIAGNOSTICS = {
     "/api/diagnostics/camera": ("camera", log_camera_error),
@@ -79,7 +81,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.3.2"
+VERSION = "0.4.0"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
@@ -639,7 +641,7 @@ def main():
             logs.move_device_logs(source or LEGACY_DATABASE)
         logs.move_device_logs(options.db)
         try:
-            with logs.monitor(database_directory):
+            with logs.monitor(database_directory), report_notifications(options.db, None if options.test else max_bot, logs.server):
                 server.serve_forever()
         except KeyboardInterrupt:
             pass

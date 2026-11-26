@@ -1,5 +1,5 @@
 import { request, initData, needsMax, withTimeout, loadSession, logoutSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink, showSiteVersion } from "./ui.js";
-import { appendReportDetails, reportCard, decisionStats, reviewPageUrl } from "./report-view.js";
+import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, REPORT_ID } from "./report-view.js";
 
 const $ = (id) => document.getElementById(id);
 const accountDialog = $("account-dialog");
@@ -452,7 +452,7 @@ function renderTab(tab, identifier, filter = "sent") {
         return;
     }
     requireAccount(() => {
-        if (identifier) showDetails(identifier);
+        if (identifier != null) showDetails(identifier);
         else showList(filter);
     });
 }
@@ -477,7 +477,7 @@ function renderLocation() {
     const tab = tabFromUrl();
     const params = new URL(location.href).searchParams;
     const review = params.get("review");
-    if (tab === "profile" && (review === "queue" || /^[1-9][0-9]{0,18}$/.test(review))) {
+    if (tab === "profile" && (review === "queue" || REPORT_ID.test(review))) {
         location.replace(reviewPageUrl(review === "queue" ? undefined : review));
         return;
     }
@@ -489,18 +489,27 @@ for (const tab of Object.keys(tabTitles)) {
 }
 window.addEventListener("popstate", renderLocation);
 $("open-about").addEventListener("click", showAbout);
-const parkingWarning = $("parking-warning");
-let warningClickAnimation;
-parkingWarning.addEventListener("click", () => {
-    warningClickAnimation?.cancel();
-    if (!window.matchMedia("(prefers-reduced-motion: no-preference)").matches) return;
-    warningClickAnimation = parkingWarning.firstElementChild.animate?.([
-        { transform: "scale(1)" },
-        { transform: "scale(.92)", offset: .24 },
-        { transform: "scale(1.08)", offset: .6 },
-        { transform: "scale(1)" },
-    ], { duration: 360, easing: "ease-in-out" });
-});
+function animateSceneButton(control, keyframes, duration) {
+    let motion;
+    control.addEventListener("click", () => {
+        motion?.cancel();
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        motion = control.firstElementChild.animate?.(keyframes, { duration, easing: "ease-in-out" });
+    });
+}
+
+animateSceneButton($("parking-warning"), [
+    { transform: "scale(1)" },
+    { transform: "scale(.92)", offset: .24 },
+    { transform: "scale(1.08)", offset: .6 },
+    { transform: "scale(1)" },
+], 360);
+animateSceneButton($("parking-car"), [
+    { transform: "none" },
+    { transform: "scale(1.018, .966)", offset: .27 },
+    { transform: "translateY(-2px) scale(.993, 1.016)", offset: .63 },
+    { transform: "none" },
+], 380);
 loadSession().then((data) => {
     if (session === null) setSession(data);
     if (data.camera_login && currentTab === "home") $("open-report").click();

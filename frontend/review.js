@@ -1,5 +1,5 @@
 import { request, initData, needsMax, loadSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink, showSiteVersion } from "./ui.js";
-import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses } from "./report-view.js";
+import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses, REPORT_ID } from "./report-view.js";
 
 const content = document.getElementById("review-content");
 const title = document.getElementById("review-title");
@@ -8,7 +8,7 @@ const storageWarning = document.getElementById("review-storage-warning");
 const siteLink = document.getElementById("site-link");
 siteLink.hash = location.hash;
 const reportParam = new URLSearchParams(location.search).get("report");
-const reportId = /^[1-9][0-9]{0,18}$/.test(reportParam) ? reportParam : null;
+const reportId = REPORT_ID.test(reportParam) ? reportParam : null;
 let version = 0;
 let storageTimer;
 

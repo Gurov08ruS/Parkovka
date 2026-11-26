@@ -97,6 +97,16 @@ def initialize_database(database):
                 if name in columns:
                     connection.execute(f"ALTER TABLE accounts DROP COLUMN {name}")
             connection.execute("PRAGMA user_version = 3")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS enqueue_max_report_notification
+            AFTER INSERT ON report_events
+            WHEN NEW.status IN ('pending', 'approved', 'rejected') AND EXISTS (
+                SELECT 1 FROM reports JOIN accounts ON accounts.id = reports.owner_id
+                WHERE reports.id = NEW.report_id AND reports.submitted_at IS NOT NULL AND accounts.source = 'max'
+                    AND (NEW.account_ban = 0 OR reports.status <> 'rejected')
+            )
+            BEGIN
+                INSERT INTO max_report_notifications (event_id) VALUES (NEW.id);
+            END""")
 
 
 def coordinates(data):
@@ -153,16 +163,21 @@ def report_fields(data, *, draft):
     return (*location, comment, plate, "manual" if plate else None, "unverified" if plate else None, region, region_source)
 
 
+def insert_report(connection, owner_id, fields):
+    identifier = None if connection.execute("SELECT 1 FROM reports WHERE id = 0").fetchone() else 0
+    return connection.execute(
+        """INSERT INTO reports (id, owner_id, latitude, longitude, comment, plate_number, plate_source, plate_verification,
+                                plate_region, plate_region_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (identifier, owner_id, *fields),
+    ).lastrowid
+
+
 def create_draft(connection, data, owner_id):
     fields = report_fields(data, draft=True)
     connection.execute("BEGIN IMMEDIATE")
     ensure_active(connection, owner_id)
-    identifier = connection.execute(
-        """INSERT INTO reports (owner_id, latitude, longitude, comment, plate_number, plate_source, plate_verification,
-                                plate_region, plate_region_source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (owner_id, *fields),
-    ).lastrowid
+    identifier = insert_report(connection, owner_id, fields)
     return report_json(connection.execute(REPORT_QUERY + " WHERE reports.id = ?", (identifier,)).fetchone())
 
 
@@ -195,7 +210,7 @@ def save_capture(connection, data, owner_id, *, draft=False):
         (capture_id,),
     ).fetchone()
     if previous is None:
-        identifier = connection.execute("INSERT INTO reports (owner_id) VALUES (?)", (owner_id,)).lastrowid
+        identifier = insert_report(connection, owner_id, fields)
     else:
         if previous["owner_id"] != owner_id:
             raise ApiError(HTTPStatus.CONFLICT, "Создайте новое обращение и повторите отправку.")
@@ -205,12 +220,12 @@ def save_capture(connection, data, owner_id, *, draft=False):
         if previous["status"] != "draft":
             raise ApiError(HTTPStatus.CONFLICT, "Этот черновик уже закрыт.")
 
-    connection.execute(
-        """UPDATE reports SET latitude = ?, longitude = ?, comment = ?,
-                              plate_number = ?, plate_source = ?, plate_verification = ?,
-                              plate_region = ?, plate_region_source = ? WHERE id = ?""",
-        (*fields, identifier),
-    )
+        connection.execute(
+            """UPDATE reports SET latitude = ?, longitude = ?, comment = ?,
+                                  plate_number = ?, plate_source = ?, plate_verification = ?,
+                                  plate_region = ?, plate_region_source = ? WHERE id = ?""",
+            (*fields, identifier),
+        )
     connection.execute(
         """INSERT INTO report_captures (report_id, capture_id, address, photo, detail_photo, captured_at)
            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(report_id) DO UPDATE SET
@@ -261,7 +276,7 @@ def reviewer_decision_stats(connection, account_id):
 def list_reports(connection, account, reviewer=False):
     scope, value = report_scope(account, reviewer)
     order = "CASE reports.status WHEN 'pending' THEN 0 WHEN 'under_review' THEN 1 ELSE 2 END, " if reviewer else ""
-    rows = connection.execute(REPORT_QUERY + f" WHERE {scope} ORDER BY {order}reports.id DESC", (value,))
+    rows = connection.execute(REPORT_QUERY + f" WHERE {scope} ORDER BY {order}reports.created_at DESC, reports.id DESC", (value,))
     return [report_json(row) for row in rows]
 
 

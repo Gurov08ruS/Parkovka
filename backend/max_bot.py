@@ -23,7 +23,9 @@ WELCOME_MESSAGE = (
 
 
 class MaxApiError(Exception):
-    pass
+    def __init__(self, message, *, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def webhook_url(public_url):
@@ -96,7 +98,7 @@ class MaxBot:
                 result = json.loads(response.read(1024 * 1024))
         except HTTPError as error:
             error.close()
-            raise MaxApiError(f"MAX API вернул HTTP {error.code}.") from None
+            raise MaxApiError(f"MAX API вернул HTTP {error.code}.", status=error.code) from None
         except URLError as error:
             if isinstance(error.reason, ssl.SSLCertVerificationError):
                 raise MaxApiError(
@@ -157,6 +159,17 @@ class MaxBot:
             "text": WELCOME_MESSAGE,
             "attachments": [{"type": "inline_keyboard", "payload": {"buttons": [[button]]}}],
         })
+
+    def send_report_notification(self, user_id, report_id, status, note):
+        result = {
+            "pending": "отправлено на проверку",
+            "approved": "принято по итогам проверки",
+            "rejected": "отклонено",
+        }[status]
+        text = f"Обращение №{report_id} {result}."
+        if status == "rejected" and note:
+            text += f"\n\nПричина: {note}"
+        self.api(f"/messages?{urlencode({'user_id': user_id})}", {"text": text})
 
     def handle_update(self, update):
         recipient = welcome_recipient(update)

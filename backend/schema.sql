@@ -62,3 +62,9 @@ CREATE TABLE IF NOT EXISTS report_events (
 
 CREATE INDEX IF NOT EXISTS report_events_report ON report_events(report_id, id);
 CREATE INDEX IF NOT EXISTS report_events_actor_status ON report_events(actor_id, status);
+
+CREATE TABLE IF NOT EXISTS max_report_notifications (
+    event_id INTEGER PRIMARY KEY REFERENCES report_events(id) ON DELETE CASCADE,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt INTEGER NOT NULL DEFAULT 0
+);

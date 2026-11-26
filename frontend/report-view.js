@@ -1,6 +1,7 @@
 import { element } from "./ui.js";
 
 const banNotice = "Автоматически отклонено из-за блокировки аккаунта";
+export const REPORT_ID = /^(?:0|[1-9][0-9]{0,18})$/;
 
 export const statuses = {
     draft: "Черновик",
@@ -32,7 +33,7 @@ function plateLabel(report) {
 function appendBanNotice(container, report, banLink) {
     if (!report.auto_rejected) return;
     const notice = element("p", banNotice, "report-ban-notice");
-    if (banLink && report.ban_report_id) {
+    if (banLink && report.ban_report_id != null) {
         const link = element("a", `Обращение №${report.ban_report_id}, из-за которого заблокировали аккаунт`);
         link.href = banLink(report.ban_report_id);
         notice.append(element("br"), link);
@@ -42,7 +43,7 @@ function appendBanNotice(container, report, banLink) {
 
 export function reviewPageUrl(identifier) {
     const url = new URL("/review.html", location.href);
-    if (identifier) url.searchParams.set("report", identifier);
+    if (identifier != null) url.searchParams.set("report", identifier);
     url.hash = location.hash;
     return url.href;
 }

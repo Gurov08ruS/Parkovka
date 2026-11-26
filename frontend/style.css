@@ -42,10 +42,16 @@ main {
 }
 .hero-copy h2 { font-size: 29px; line-height: 1.18; letter-spacing: -.03em; }
 .hero-copy p { margin-top: 15px; max-width: 34ch; color: var(--muted); font-size: 15px; }
-.parking-scene { position: relative; width: min(100%, 257px); aspect-ratio: 1120 / 1024; justify-self: center; margin-top: 28px; }
-.parking-car { display: block; width: 100%; height: auto; }
+.parking-scene { position: relative; width: min(100%, 257px); aspect-ratio: 1310 / 1200; justify-self: center; margin-top: 10px; }
+.parking-platform, .parking-car img { display: block; width: 100%; height: auto; }
+.parking-car {
+	position: absolute; left: 10%; top: 33%; width: 61%;
+	padding: 0; border: 0; border-radius: 38%; background: transparent;
+	-webkit-tap-highlight-color: transparent;
+}
+.parking-car img { transform-origin: 52% 91%; }
 .parking-warning {
-	position: absolute; width: 18%; left: 48%; top: -12.5%; transform: translateX(-50%);
+	position: absolute; width: 15%; left: 45.5%; top: 1%; transform: translateX(-50%);
 	padding: 0; border: 0; border-radius: 12px; background: transparent;
 }
 .parking-warning img { display: block; width: 100%; height: auto; filter: drop-shadow(0 5px 7px rgba(204, 68, 110, .12)); }
@@ -103,7 +109,7 @@ main {
 @media (prefers-reduced-motion: no-preference) {
 	.parking-warning { animation: warning-float 2.4s ease-in-out infinite; }
 	button { transition: transform 120ms ease-out, box-shadow 160ms ease-out; }
-	button:enabled:active:not(.tab-bar button, .parking-warning) { transform: translateY(1px) scale(.98); }
+	button:enabled:active:not(.tab-bar button, .parking-warning, .parking-car) { transform: translateY(1px) scale(.98); }
 
 	.hero { animation: card-appear 460ms ease-out; }
 	.guide { animation: card-appear 460ms 80ms ease-out backwards; }
@@ -737,7 +743,8 @@ main {
 }
 .hero-copy p { margin-top: 13px; max-width: 31ch; font-size: 15px; }
 .parking-scene { grid-area: scene; width: min(100%, 300px); }
-.parking-car { filter: drop-shadow(0 12px 12px #195db83d); }
+.parking-platform { filter: drop-shadow(0 12px 12px #195db83d); }
+.parking-car img { filter: drop-shadow(1px 4px 4px #08285b60); }
 
 .guide, .max-browser-notice,
 .profile-card, .achievement-card, .empty-card, .report-card,
