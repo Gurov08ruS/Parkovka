@@ -128,14 +128,12 @@
 							<label for="plate-number">Госномер автомобиля <span>Необязательно</span></label>
 							<div class="plate-input">
 							<input id="plate-number" type="text" maxlength="32" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="А123ВС" aria-describedby="plate-note" pattern="[АВЕКМНОРСТУХ0-9 \-]*">
-								<div class="plate-region-field">
-									<label for="plate-region">Регион</label>
-									<input id="plate-region" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{2,3}" autocomplete="off" placeholder="—" aria-describedby="plate-region-note">
+								<div class="plate-region-field" aria-label="Регион и флаг России">
+									<input id="plate-region" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{2,3}" autocomplete="off" placeholder="—" aria-label="Код региона" aria-describedby="plate-region-note">
+									<span class="plate-country"><span>RUS</span><span class="plate-flag" role="img" aria-label="Флаг России"></span></span>
 								</div>
-								<span class="plate-flag" role="img" aria-label="Флаг России"></span>
-								<span class="plate-flag" id="plate-region-flag" role="img" hidden></span>
 							</div>
-							<p id="plate-region-note" role="status" hidden></p>
+							<div class="plate-region-info"><span class="plate-flag" id="plate-region-flag" role="img" hidden></span><p id="plate-region-note" role="status" hidden></p></div>
 							<p id="plate-note">Введённый госномер не подтверждён</p>
 						</div>
 						<h3 id="location-title">Местоположение</h3>

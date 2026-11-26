@@ -297,18 +297,24 @@ main {
 .plate-field { display: grid; gap: 8px; }
 .plate-field > label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .plate-field > label span { font-size: 12px; font-weight: 400; color: var(--muted); }
-.plate-input { display: flex; align-items: center; gap: 6px; padding-right: 8px; overflow: hidden; border: 2px solid var(--deep-blue); border-radius: 12px; background: white; }
-#report-form .plate-input input { border: 0; border-radius: 0; min-width: 0; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; background: transparent; box-shadow: none; }
+.plate-input { display: flex; align-items: stretch; width: min(100%, 360px); min-height: 68px; overflow: hidden; border: 3px solid #121820; border-radius: 8px; background: #fff; color: #121820; }
+#report-form .plate-input input { border: 0; border-radius: 0; min-width: 0; letter-spacing: .02em; text-transform: uppercase; font-family: "Arial Narrow", "Roboto Condensed", Arial, sans-serif; font-weight: 700; background: transparent; box-shadow: none; color: #121820; }
+#report-form #plate-number { flex: 1; width: 0; padding: 8px; font-size: clamp(22px, 7vw, 34px); text-align: center; }
 .plate-input input:focus-visible { outline-offset: -3px; }
-.plate-region-field { flex: 0 0 68px; align-self: stretch; display: grid; align-content: center; border-left: 1px solid var(--ice); text-align: center; }
-.plate-region-field label { padding-top: 4px; color: var(--muted); font-size: 11px; }
-#report-form #plate-region { min-height: 30px; padding: 2px 0 6px; text-align: center; }
-#report-form #plate-region::placeholder { color: #68707a; color: light-dark(#68707a, #aab2bc); opacity: 1; }
-.plate-flag { flex: 0 0 24px; width: 24px; height: 16px; border-radius: 2px; background: url("images/plate-flags.webp") left top / 1000% 1000% no-repeat; }
+.plate-region-field { flex: 0 0 76px; display: grid; grid-template-rows: 1fr auto; align-items: center; border-left: 2px solid #121820; text-align: center; }
+#report-form #plate-region { min-height: 38px; padding: 0 2px; text-align: center; font-size: 24px; }
+#report-form #plate-region::placeholder { color: #68707a; opacity: 1; }
+.plate-country { display: flex; align-items: center; justify-content: center; gap: 4px; padding-bottom: 4px; font: 700 11px/1 Arial, sans-serif; color: #121820; }
+.plate-flag { display: inline-block; flex: 0 0 24px; width: 24px; height: 16px; border-radius: 2px; background: url("images/plate-flags.webp") left top / 1000% 1000% no-repeat; }
+.plate-region-info { display: flex; align-items: center; gap: 8px; }
 .plate-field p { color: var(--muted); font-size: 13px; }
 .report-plate-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--deep-blue); overflow-wrap: anywhere; }
-.report-plate-summary span { padding: 3px 8px; border-radius: 12px; background: #FFF0B3; color: #684A00; font-size: 13px; }
+.report-plate-summary .plate-verification { padding: 3px 8px; border-radius: 12px; background: #FFF0B3; color: #684A00; font-size: 13px; }
 .report-plate-summary small { color: var(--muted); }
+.registration-plate { display: inline-flex; align-items: stretch; max-width: 100%; min-height: 60px; overflow: hidden; border: 3px solid #121820; border-radius: 7px; background: #fff; color: #121820; }
+.registration-number { display: grid; place-items: center; min-width: 154px; max-width: 100%; padding: 4px 9px; font: 700 28px/1 "Arial Narrow", "Roboto Condensed", Arial, sans-serif; letter-spacing: .02em; overflow-wrap: anywhere; }
+.registration-region { display: grid; grid-template-rows: 1fr auto; min-width: 67px; border-left: 2px solid #121820; text-align: center; }
+.registration-code { align-self: center; padding: 1px 3px; font: 700 23px/1 Arial, sans-serif; }
 
 .report-actions {
 	display: flex;
@@ -885,13 +891,14 @@ main {
 }
 .report-button:hover { box-shadow: var(--gel-shadow); filter: brightness(1.08); }
 
-:is(.panel-dialog, .tab-screen) :is(input, textarea, select), .plate-input {
+:is(.panel-dialog, .tab-screen) :is(input, textarea, select) {
 	border-color: var(--card-border);
 	border-radius: 15px;
 	background: var(--field);
 	color: var(--ink);
 	box-shadow: inset 0 2px 5px #0c477227;
 }
+.plate-input { border-color: #121820; background: #fff; box-shadow: none; }
 :is(.panel-dialog, .tab-screen) :is(input, textarea)::placeholder { color: var(--muted); }
 :is(.panel-dialog, .tab-screen) :is(input, textarea, select):focus { border-color: var(--blue); }
 .plate-input:has([aria-invalid="true"]) { border-color: var(--accent); }
@@ -907,7 +914,7 @@ main {
 .review-storage-warning { background: var(--surface); border-color: var(--accent); color: var(--ink); }
 .report-status { padding: 4px 9px; border-radius: 999px; box-shadow: inset 0 1px 1px var(--edge-light); }
 @media (prefers-color-scheme: dark) {
-	.status-pending, .report-plate-summary span { background: #544023; color: #ffdf9e; }
+	.status-pending, .report-plate-summary .plate-verification { background: #544023; color: #ffdf9e; }
 	.status-approved { background: #214d78; color: #c2e6ff; }
 	.status-rejected { background: #59283c; color: #ffd0db; }
 }

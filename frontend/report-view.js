@@ -26,8 +26,32 @@ function reportStatus(report) {
     return element("span", statuses[report.status] || report.status, `report-status status-${report.status}`);
 }
 
-function plateLabel(report) {
-    return [report.plate_number, report.plate_region].filter(Boolean).join(" ");
+function plateDisplay(report) {
+    const raw = report.plate_number;
+    const match = /^([a-zа-я]\s*\d{3}\s*[a-zа-я]\s*[a-zа-я])[\s-]*(\d{2,3})$/iu.exec(raw.trim());
+    const number = match ? match[1] : raw;
+    const region = report.plate_region || match?.[2] || "";
+    const plate = element("div", "", "registration-plate");
+    plate.setAttribute("aria-label", `Госномер ${number}${region ? `, регион ${region}` : ""}`);
+    const plateNumber = element("strong", number, "registration-number");
+    const area = element("span", "", "registration-region");
+    const country = element("span", "", "plate-country");
+    const flag = element("span", "", "plate-flag");
+    flag.setAttribute("aria-hidden", "true");
+    country.append(element("span", "RUS"), flag);
+    area.append(element("span", region || "—", "registration-code"), country);
+    plate.append(plateNumber, area);
+    return plate;
+}
+
+function plateDetails(report) {
+    const section = element("div", "", "report-plate-summary");
+    const status = report.plate_verification === "verified" ? "Подтверждён" : "Не подтверждён";
+    section.append(plateDisplay(report), element("span", status, "plate-verification"));
+    if (report.plate_region_source === "location" && report.plate_verification !== "verified") {
+        section.append(element("small", "Регион предположен по месту съёмки"));
+    }
+    return section;
 }
 
 function appendBanNotice(container, report, banLink) {
@@ -66,9 +90,7 @@ export function reportCard(report, path, control, banLink) {
     card.append(heading, element("small", `${placeLabel(report)} · ${dateLabel(report.submitted_at || report.created_at)}`));
     appendBanNotice(card, report, banLink);
     if (report.plate_number) {
-        const plate = element("p", `Госномер: ${plateLabel(report)} · ${report.plate_verification === "verified" ? "Подтверждён" : "Не подтверждён"}`, "report-plate-summary");
-        if (report.plate_region_source === "location" && report.plate_verification !== "verified") plate.append(element("small", "Регион предположен по месту съёмки"));
-        card.append(plate);
+        card.append(plateDetails(report));
     }
     if (report.has_photo) {
         const gallery = element("div", "", "report-photos");
@@ -95,10 +117,7 @@ export function appendReportDetails(container, report, path, banLink) {
     if (report.location_source === "manual") container.append(element("p", "Место выбрано по адресу вручную"));
     if (report.captured_at) container.append(element("p", `Снято ${dateLabel(report.captured_at)}`));
     if (report.plate_number) {
-        const plate = element("div", "", "report-plate-summary");
-        plate.append(element("strong", plateLabel(report)), element("span", report.plate_verification === "verified" ? "Подтверждён" : "Не подтверждён"));
-        if (report.plate_region_source === "location" && report.plate_verification !== "verified") plate.append(element("small", "Регион предположен по месту съёмки"));
-        container.append(plate);
+        container.append(plateDetails(report));
     }
     if (report.comment) container.append(element("p", report.comment, "report-comment"));
     const gallery = element("div", "", "report-photos");
