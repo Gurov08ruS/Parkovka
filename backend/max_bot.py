@@ -5,8 +5,6 @@ import re
 import secrets
 import ssl
 import time
-from io import BytesIO
-from zipfile import ZIP_STORED, ZipFile
 from collections import OrderedDict
 from threading import Lock
 from urllib.error import HTTPError, URLError
@@ -168,31 +166,29 @@ class MaxBot:
             "attachments": [{"type": "inline_keyboard", "payload": {"buttons": [[button]]}}],
         })
 
-    def upload_report_photos(self, photos):
-        archive = BytesIO()
-        with ZipFile(archive, "w", compression=ZIP_STORED) as output:
-            for name, photo in photos:
-                extension = "png" if photo.startswith(b"\x89PNG") else "jpg"
-                output.writestr(f"{name}.{extension}", photo)
-        upload = self.api("/uploads?type=file", {})
-        destination = upload.get("url")
+    def upload_report_photo(self, photo):
+        if len(photo) > 50 * 1024 * 1024:
+            raise MaxApiError("Фото превышает ограничение MAX в 50 МБ.")
+        destination = self.api("/uploads?type=image", {}).get("url")
         parsed = urlsplit(destination or "")
-        if parsed.scheme != "https" or parsed.hostname != "fu.oneme.ru" or parsed.username or parsed.password:
+        if parsed.scheme != "https" or parsed.hostname != "iu.oneme.ru" or parsed.username or parsed.password:
             raise MaxApiError("MAX вернул некорректный адрес загрузки фото.")
         boundary = secrets.token_hex(24)
-        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="data"; filename="photos.zip"\r\n'
-                'Content-Type: application/zip\r\n\r\n').encode() + archive.getvalue() + f"\r\n--{boundary}--\r\n".encode()
+        extension = "png" if photo.startswith(b"\x89PNG") else "jpg"
+        mime = "image/png" if extension == "png" else "image/jpeg"
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="data"; filename="photo.{extension}"\r\n'
+                f'Content-Type: {mime}\r\n\r\n').encode() + photo + f"\r\n--{boundary}--\r\n".encode()
         request = Request(destination, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
         request.add_unredirected_header("Authorization", self.token)
         try:
             with urlopen(request, timeout=60, context=self.tls) as response:
                 result = json.loads(response.read(1024 * 1024))
-            token = result.get("token")
+            token = next(iter(result["photos"].values()))["token"]
             if not isinstance(token, str) or not token:
                 raise ValueError
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, KeyError, TypeError, StopIteration):
             raise MaxApiError("Не удалось загрузить фотографию в MAX.") from None
-        return {"type": "file", "payload": {"token": token}}
+        return {"type": "image", "payload": {"token": token}}
 
     def send_report_notification(self, user_id, report_id, status, note, report):
         result = {
@@ -217,10 +213,10 @@ class MaxBot:
                 raise MaxApiError("MAX API не вернул публичный никнейм бота.")
             self.miniapp_url = f"https://max.ru/{username}?startapp"
         button = {"type": "link", "text": "Открыть обращение", "url": f"{self.miniapp_url}=report_{report_id}"}
-        photos = [(name, photo) for name, photo in (("car", report["photo"]), ("plate", report["detail_photo"])) if photo]
-        attachments = [self.upload_report_photos(photos)] if photos else []
-        if photos:
-            text += "\n\nОригиналы фотографий приложены файлом."
+        photos = [photo for photo in (report["photo"], report["detail_photo"]) if photo]
+        attachments = [self.upload_report_photo(photo) for photo in photos if len(photo) <= 50 * 1024 * 1024]
+        if len(attachments) != len(photos):
+            text += "\n\nНекоторые снимки доступны в обращении по кнопке ниже."
         attachments.append({"type": "inline_keyboard", "payload": {"buttons": [[button]]}})
         path = f"/messages?{urlencode({'user_id': user_id})}"
         body = {"text": text, "attachments": attachments}
