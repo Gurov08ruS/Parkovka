@@ -66,26 +66,55 @@ export function requestMaxCameraAccess() {
 }
 
 async function requestBridgeCameraAccess() {
-    const app = await withTimeout(bridge, 4000, "MaxBridgeUnavailable").catch(() => null);
+    const app = await withTimeout(bridge, 4000, "MaxBridgeUnavailable");
     const manager = app?.PermissionsManager;
-    if (!manager || typeof manager.requestAccess !== "function") return false;
+    if (typeof manager?.init !== "function" || typeof manager.requestAccess !== "function") {
+        throw new DOMException("", "MaxBridgeUnavailable");
+    }
     return withTimeout(checkMaxCameraPermission(manager), 30000, "MaxPermissionTimeout");
 }
 
-async function checkMaxCameraPermission(manager) {
-    let camera;
-    try {
-        if (!manager.isInited) await manager.init();
-        ({ camera } = (await manager.requestAccess(["camera"], "Для съёмки знака и автомобиля")) || {});
-    } catch (error) {
-        const code = String(error?.error?.code || error?.code || "");
-        if (code.endsWith("app_permission_denied")) throw new DOMException("", "MaxAppPermissionDenied");
-        if (code.endsWith("system_permission_denied")) throw new DOMException("", "MaxSystemPermissionDenied");
-        throw new DOMException("", "MaxPermissionError");
+function maxPermissionCode(error) {
+    const code = error?.error?.code ?? error?.code;
+    return typeof code === "string" ? code : error?.name;
+}
+
+function maxPermissionFailure(error, bridgeStep) {
+    const code = maxPermissionCode(error);
+    let name = "MaxPermissionError";
+    if (typeof code === "string") {
+        if (code.endsWith("app_permission_denied")) name = "MaxAppPermissionDenied";
+        if (code.endsWith("system_permission_denied")) name = "MaxSystemPermissionDenied";
     }
-    if (camera?.appAccessGranted === false) throw new DOMException("", "MaxAppPermissionDenied");
-    if (camera?.systemAccessGranted === false) throw new DOMException("", "MaxSystemPermissionDenied");
-    return true;
+    return Object.assign(new DOMException("", name), { bridgeCode: code, bridgeStep });
+}
+
+async function checkMaxCameraPermission(manager) {
+    for (const retry of [false, true]) {
+        try {
+            await manager.init();
+        } catch (error) {
+            throw maxPermissionFailure(error, "init");
+        }
+
+        let info;
+        try {
+            info = await manager.requestAccess(["camera"], "Для съёмки знака и автомобиля");
+        } catch (error) {
+            const code = maxPermissionCode(error);
+            if (!retry && ["client.permissions_request_access.not_inited", "client.permissions_request_access.not_found"].includes(code)) continue;
+            throw maxPermissionFailure(error, "request");
+        }
+
+        const camera = info?.camera;
+        if (camera?.appAccessGranted === false && camera.appAccessRequested !== false) {
+            throw maxPermissionFailure({ code: "app_permission_denied" }, "request");
+        }
+        if (camera?.systemAccessGranted === false) {
+            throw maxPermissionFailure({ code: "system_permission_denied" }, "request");
+        }
+        return;
+    }
 }
 
 export function maxCameraSettings(code) {

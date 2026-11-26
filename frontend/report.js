@@ -97,12 +97,12 @@ function deviceFailure(device, stage, code, details = {}) {
     });
 }
 
-function cameraFailure(stage, code, message) {
+function cameraFailure(stage, code, message, { settings = code, ...details } = {}) {
     cameraStatus.textContent = message;
     cameraViewStatus.textContent = message;
-    openCameraSettings = maxCameraSettings(code);
+    openCameraSettings = maxCameraSettings(settings);
     cameraSettingsButton.hidden = !openCameraSettings;
-    deviceFailure("camera", stage, code, { photo: photoKind });
+    deviceFailure("camera", stage, code, { photo: photoKind, ...details });
 }
 
 function updateButtons() {
@@ -315,28 +315,34 @@ async function openCamera(kind) {
         cameraFailure("context", "insecure_context", secureContextMessage);
         return;
     }
-    const policy = document.permissionsPolicy ?? document.featurePolicy;
-    if (policy?.allowsFeature?.("camera") === false) {
-        cameraFailure("context", "policy_blocked", "Камера заблокирована для этой страницы. Откройте мини-приложение из чата с ботом MAX");
-        return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-        cameraFailure("context", "api_unavailable", "Этот браузер не поддерживает съёмку с камеры");
-        return;
-    }
-
     const current = session;
-    let stage = "max_permissions";
+    let maxPermissionIssue;
     openingCamera = true;
     updateButtons();
     cameraStatus.textContent = "Запрашиваем доступ к камере…";
     try {
-        const bridgeAccess = requestMaxCameraAccess();
-        if (bridgeAccess && !(await bridgeAccess)) {
-            deviceFailure("camera", "max_permissions", "MaxBridgeUnavailable", { photo: kind });
+        try {
+            await requestMaxCameraAccess();
+        } catch (error) {
+            if (current !== session) return;
+            maxPermissionIssue = error.name;
+            const details = { photo: kind, bridge_code: error.bridgeCode, bridge_step: error.bridgeStep };
+            if (maxPermissionIssue === "MaxAppPermissionDenied") {
+                cameraFailure("max_permissions", maxPermissionIssue, cameraMessages.get(maxPermissionIssue), details);
+                return;
+            }
+            deviceFailure("camera", "max_permissions", maxPermissionIssue, details);
         }
         if (current !== session) return;
-        stage = "stream";
+        const policy = document.permissionsPolicy ?? document.featurePolicy;
+        if (policy?.allowsFeature?.("camera") === false) {
+            cameraFailure("context", "policy_blocked", "Камера заблокирована для этой страницы. Откройте мини-приложение из чата с ботом MAX");
+            return;
+        }
+        if (!navigator.mediaDevices?.getUserMedia) {
+            cameraFailure("context", "api_unavailable", "Этот браузер не поддерживает съёмку с камеры");
+            return;
+        }
         for (const video of new Set([preferredCamera, defaultCamera, true])) {
             let activeStream;
             try {
@@ -351,11 +357,10 @@ async function openCamera(kind) {
         }
     } catch (error) {
         if (current !== session) return;
-        const code = cameraMessages.has(error?.name)
-            ? error.name
-            : (stage === "max_permissions" ? "MaxPermissionError" : "UnknownError");
+        const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
+        const settings = code === "NotAllowedError" && maxPermissionIssue === "MaxSystemPermissionDenied" ? maxPermissionIssue : code;
         stopCamera();
-        cameraFailure(stage, code, cameraMessages.get(code) || "Не удалось открыть камеру. Попробуйте ещё раз");
+        cameraFailure("stream", code, cameraMessages.get(settings) || "Не удалось открыть камеру. Попробуйте ещё раз", { settings });
     } finally {
         if (current === session) {
             openingCamera = false;

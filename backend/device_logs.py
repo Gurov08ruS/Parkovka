@@ -1,8 +1,11 @@
 import json
+import re
 
 
 STAGES = {"context", "max_permissions", "stream", "preview", "capture", "switch", "flash"}
 PLATFORMS = {"android", "ios", "desktop", "web", "browser", "unknown"}
+MAX_BRIDGE_CODE = re.compile(r"(?:client|server)(?:\.[a-z_][a-z_0-9]*){1,5}")
+MAX_PERMISSION_CODES = {"app_permission_denied", "system_permission_denied", "TypeError", "Error", "NotSupportedError", "AbortError"}
 CODES = {
     "insecure_context", "api_unavailable", "policy_blocked", "document_hidden", "track_ended", "preview_timeout",
     "video_error", "frame_unavailable", "invalid_jpeg", "invalid_image", "photo_too_large",
@@ -25,6 +28,13 @@ def log_camera_error(logger, data):
             or photo not in ("overview", "detail")):
         raise ValueError("Некорректная диагностика камеры.")
     event = {"stage": stage, "code": code, "photo": photo}
+    if stage == "max_permissions":
+        bridge_code = data.get("bridge_code")
+        if (isinstance(bridge_code, str) and len(bridge_code) <= 120
+                and (bridge_code in MAX_PERMISSION_CODES or MAX_BRIDGE_CODE.fullmatch(bridge_code))):
+            event["bridge_code"] = bridge_code
+        if data.get("bridge_step") in ("init", "request"):
+            event["bridge_step"] = data["bridge_step"]
     write_event(logger, event, data)
 
 
