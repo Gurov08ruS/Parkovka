@@ -143,22 +143,21 @@
 						<button type="button" id="back-to-photos">Вернуться к фотографиям</button>
 					</div>
 				</section>
-				<div id="camera-view" hidden>
-					<div class="camera-actions camera-toolbar" id="camera-toolbar">
-						<button type="button" id="cancel-camera">Закрыть</button>
-						<button type="button" id="switch-camera">Перевернуть</button>
-					</div>
-					<video id="camera-preview" autoplay muted playsinline></video>
-					<p id="camera-view-status" role="status">Подключаем камеру…</p>
-					<button type="button" id="play-camera" hidden>Запустить предпросмотр</button>
-					<div class="camera-actions">
-						<span class="camera-spacer" aria-hidden="true"></span>
-						<button class="primary-button" type="button" id="take-photo" disabled>Сфотографировать</button>
-						<button type="button" id="camera-flash" aria-pressed="false" hidden>Вспышка</button>
-					</div>
-				</div>
 			</form>
 		</dialog>
 	</main>
+	<dialog id="camera-view" aria-label="Камера">
+		<video id="camera-preview" autoplay muted playsinline></video>
+		<div class="camera-toolbar">
+			<p id="camera-view-status" role="status">Подключаем камеру…</p>
+			<button type="button" class="camera-icon" id="cancel-camera" aria-label="Закрыть камеру" title="Закрыть камеру" autofocus><span aria-hidden="true">×</span></button>
+		</div>
+		<button type="button" id="play-camera" hidden>Запустить предпросмотр</button>
+		<div class="camera-actions">
+			<button type="button" class="camera-icon" id="camera-flash" aria-label="Вспышка" title="Вспышка" aria-pressed="false" hidden><span aria-hidden="true">⚡︎</span></button>
+			<button type="button" id="take-photo" aria-label="Сфотографировать" title="Сфотографировать" disabled></button>
+			<button type="button" class="camera-icon" id="switch-camera" aria-label="Переключить камеру" title="Переключить камеру"><span aria-hidden="true">↻</span></button>
+		</div>
+	</dialog>
 </body>
 </html>

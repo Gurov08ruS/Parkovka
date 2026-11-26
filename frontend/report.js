@@ -12,7 +12,6 @@ const removeDetail = document.querySelector("#remove-detail");
 const takeButton = document.querySelector("#take-photo");
 const playButton = document.querySelector("#play-camera");
 const switchButton = document.querySelector("#switch-camera");
-const cameraToolbar = document.querySelector("#camera-toolbar");
 const cancelCameraButton = document.querySelector("#cancel-camera");
 const flashButton = document.querySelector("#camera-flash");
 const cameraViewStatus = document.querySelector("#camera-view-status");
@@ -157,9 +156,7 @@ function updateButtons() {
     plateNumber.disabled = saving || saved;
     const cameraBusy = openingCamera || capturing || changingFlash;
     takeButton.disabled = cameraBusy || !stream || !playButton.hidden || !hasCameraFrame();
-    cameraToolbar.hidden = !cameraActive && !lastCamera;
-    cancelCameraButton.hidden = !cameraActive;
-    switchButton.disabled = cameraBusy || !lastCamera || saved;
+    switchButton.disabled = cameraBusy || !cameraActive || !lastCamera || saved;
     flashButton.disabled = cameraBusy || !stream;
     flashButton.hidden = !cameraActive || !flashAvailable;
     flashButton.setAttribute("aria-pressed", String(flash !== "off"));
@@ -186,7 +183,7 @@ function hasCameraFrame() {
     return !video.paused && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
 }
 
-function stopCamera() {
+function stopCamera({ keepView = false } = {}) {
     const activeStream = stream;
     stream = null;
     activeStream?.getTracks().forEach((track) => track.stop());
@@ -195,7 +192,7 @@ function stopCamera() {
     changingFlash = capturing = false;
     flashAvailable = false;
     playButton.hidden = true;
-    cameraView.hidden = true;
+    if (!keepView && cameraView.open) cameraView.close();
     updateButtons();
 }
 
@@ -429,12 +426,11 @@ async function showCamera(activeStream, current) {
             cameraFailure("stream", "track_ended", "Камера отключилась. Откройте её ещё раз");
         }
     });
-    cameraView.hidden = false;
     video.defaultMuted = video.muted = true;
     video.srcObject = activeStream;
     cameraStatus.textContent = "Камера подключена. Ждём первый кадр…";
     cameraViewStatus.textContent = "Камера подключена. Ждём первый кадр…";
-    cameraView.scrollIntoView({ block: "nearest" });
+    if (!cameraView.open) cameraView.showModal();
     updateButtons();
     await playCamera();
 }
@@ -469,13 +465,11 @@ async function playCamera() {
             ? photoPrompt
             : "Крупным планом снимите знак или госномер, который хуже виден на первом кадре";
         cameraViewStatus.textContent = cameraStatus.textContent;
-        cameraView.scrollIntoView({ block: "nearest" });
     } catch (error) {
         if (stream !== activeStream) return;
         if (error?.name === "NotAllowedError") {
             playButton.hidden = false;
             cameraFailure("preview", "NotAllowedError", "Камера подключена. Нажмите «Запустить предпросмотр»");
-            cameraView.scrollIntoView({ block: "nearest" });
         } else if (error?.name === "preview_timeout") {
             playButton.hidden = false;
             cameraFailure("preview", "preview_timeout", "Камера не передала кадр. Запустите предпросмотр заново или выберите другую камеру");
@@ -496,13 +490,13 @@ async function playCamera() {
 async function switchCamera() {
     if (switchButton.disabled || !lastCamera) return;
     const current = session;
-    const activeStream = stream;
+    const switching = () => current === session && cameraView.open && !document.hidden;
     const { deviceId, facingMode } = lastCamera;
     openingCamera = true;
     updateButtons();
     try {
         const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-        if (current !== session || stream !== activeStream) return;
+        if (!switching()) return;
         const cameras = devices.filter((device) => device.kind === "videoinput" && device.deviceId);
         const index = cameras.findIndex((device) => device.deviceId === deviceId);
         const nextId = cameras.length > 1 && index >= 0 ? cameras[(index + 1) % cameras.length].deviceId : null;
@@ -518,35 +512,43 @@ async function switchCamera() {
 
         const previous = deviceId ? { deviceId: { exact: deviceId } } : preferredCamera;
         cameraStatus.textContent = "Переключаем камеру…";
-        stopCamera();
+        cameraViewStatus.textContent = cameraStatus.textContent;
+        stopCamera({ keepView: true });
         for (const video of choices) {
             let next;
             try {
                 next = await getCameraStream(video);
             } catch (error) {
-                if (current !== session || document.hidden) return;
+                if (!switching()) return;
                 if (error?.name === "CameraStreamTimeout") throw error;
                 continue;
+            }
+            if (!switching()) {
+                next.getTracks().forEach((item) => item.stop());
+                return;
             }
             const nextDeviceId = next.getVideoTracks()[0]?.getSettings().deviceId;
             if (deviceId && nextDeviceId === deviceId) {
                 next.getTracks().forEach((item) => item.stop());
                 continue;
             }
-            if (current === session && !document.hidden) preferredCamera = video;
+            preferredCamera = video;
             await showCamera(next, current);
             return;
         }
 
-        if (activeStream) {
-            await showCamera(await getCameraStream(previous), current);
+        const restored = await getCameraStream(previous);
+        if (!switching()) {
+            restored.getTracks().forEach((item) => item.stop());
+            return;
         }
-        if (current !== session) return;
+        await showCamera(restored, current);
+        if (!switching()) return;
         cameraFailure("switch", "NotFoundError", stream && playButton.hidden
             ? "Не удалось открыть другую камеру. Текущая камера восстановлена"
             : "Не удалось открыть другую камеру. Проверьте доступные камеры в настройках браузера");
     } catch (error) {
-        if (current !== session) return;
+        if (!switching()) return;
         stopCamera();
         const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
         cameraFailure("switch", code, "Не удалось переключить камеру. Откройте её ещё раз");
@@ -554,6 +556,7 @@ async function switchCamera() {
         if (current === session) {
             openingCamera = false;
             updateButtons();
+            if (!cameraView.open && dialog.open && !document.hidden) focusCameraOpener();
         }
     }
 }
@@ -863,16 +866,26 @@ playButton.addEventListener("click", playCamera);
 switchButton.addEventListener("click", switchCamera);
 flashButton.addEventListener("click", toggleFlash);
 takeButton.addEventListener("click", takePhoto);
-cancelCameraButton.addEventListener("click", () => {
+function focusCameraOpener() {
+    (photoKind === "detail" ? detailButton : cameraButton).focus();
+}
+
+function closeCamera() {
     lastCamera = null;
     stopCamera();
     cameraStatus.textContent = photo ? "Проверьте, что знак и госномер хорошо видны на снимках" : photoPrompt;
-    (photoKind === "detail" ? detailButton : cameraButton).focus();
+    focusCameraOpener();
+}
+
+cancelCameraButton.addEventListener("click", closeCamera);
+cameraView.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeCamera();
 });
 form.addEventListener("submit", saveReport);
 document.addEventListener("visibilitychange", () => {
     if (document.hidden && dialog.open && !saving) void autosaveDraft();
-    if (document.hidden && stream) {
+    if (document.hidden && cameraView.open) {
         stopCamera();
         cameraFailure("stream", "document_hidden", "Камера остановлена, пока вкладка была скрыта. Откройте её ещё раз");
     }
@@ -880,4 +893,4 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("online", () => {
     if (dialog.open && !saving) void autosaveDraft();
 });
-window.addEventListener("pagehide", stopCamera);
+window.addEventListener("pagehide", () => stopCamera());
