@@ -141,6 +141,10 @@
 						<h3 id="location-title">Местоположение</h3>
 						<p id="location-status" role="status">Разрешите доступ к геолокации, чтобы определить адрес</p>
 						<button type="button" id="locate">Определить мой адрес</button>
+						<label for="location-search">Найти адрес вручную</label>
+						<input id="location-search" type="search" maxlength="200" placeholder="Город, улица, дом" autocomplete="street-address">
+						<button type="button" id="search-location">Найти адрес</button>
+						<div id="location-results" class="panel-stack" aria-live="polite"></div>
 						<p class="capture-note">Для поиска адреса координаты передаются сервису Photon<br><a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></p>
 						<label>Комментарий к обращению <textarea id="report-comment" rows="3" maxlength="1000"></textarea></label>
 					</div>

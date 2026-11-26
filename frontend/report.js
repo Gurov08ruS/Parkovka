@@ -89,6 +89,7 @@ let flashAvailable = false;
 let changingFlash = false;
 let capturing = false;
 let locating = false;
+let locationSource = "geolocation";
 let locationAttempted = false;
 let locationRegion = "";
 let plateRegions;
@@ -157,6 +158,8 @@ function updateButtons() {
     const saved = submittedId !== null;
     const cameraActive = Boolean(stream);
     locateButton.disabled = locating || saving || saved;
+    document.querySelector("#search-location").disabled = locating || saving || saved;
+    document.querySelector("#location-search").disabled = locating || saving || saved;
     cameraButton.hidden = cameraActive || step !== 1;
     cameraButton.disabled = openingCamera || cameraActive || saving || saved;
     detailButton.hidden = cameraActive || step !== 2;
@@ -206,6 +209,9 @@ function resetReport() {
     session += 1;
     step = 1;
     position = address = photo = detailPhoto = capturedAt = captureId = captureOwner = submittedId = null;
+    locationSource = "geolocation";
+    document.querySelector("#location-search").value = "";
+    document.querySelector("#location-results").replaceChildren();
     startedOffline = localOnly = remoteSaved = false;
     draftRevision = savedRevision = 0;
     draftSave = null;
@@ -373,6 +379,7 @@ async function locate({ reusePosition = false } = {}) {
                 throw { code: "invalid_coordinates" };
             }
             position = { latitude, longitude };
+            locationSource = "geolocation";
             accuracy = meters;
             address = null;
             locationRegion = "";
@@ -732,6 +739,7 @@ function capturePayload(regions = null) {
     const regionCode = manualRegion || locationRegion;
     return {
         ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
+        location_source: locationSource,
         comment: comment.value, plate_number: plate, capture_id: captureId, owner_max_id: captureOwner,
         offline_created: startedOffline,
         plate_region: /^[0-9]{2,3}$/.test(regionCode) && (!regions || regions.has(regionCode)) ? regionCode : null,
@@ -889,6 +897,7 @@ async function openDraft(report, user) {
         }
         if (report.latitude !== null) {
             position = { latitude: report.latitude, longitude: report.longitude };
+            locationSource = report.location_source || "geolocation";
             address = report.address;
             locationStatus.textContent = address || `${report.latitude.toFixed(5)}, ${report.longitude.toFixed(5)}`;
             locateButton.textContent = "Определить заново";
@@ -977,6 +986,37 @@ for (const eventName of ["dragover", "drop"]) {
     dialog.addEventListener(eventName, (event) => event.preventDefault());
 }
 locateButton.addEventListener("click", () => locate());
+document.querySelector("#search-location").addEventListener("click", async () => {
+    const field = document.querySelector("#location-search");
+    const results = document.querySelector("#location-results");
+    const current = session;
+    results.textContent = "Ищем адрес…";
+    try {
+        const data = await request("/api/geocode/search", { query: field.value });
+        if (current !== session) return;
+        results.replaceChildren();
+        if (!data.results.length) results.textContent = "Адрес не найден. Уточните запрос.";
+        for (const result of data.results) {
+            const choice = document.createElement("button");
+            choice.type = "button";
+            choice.textContent = result.address;
+            choice.addEventListener("click", () => {
+                position = { latitude: result.latitude, longitude: result.longitude };
+                locationSource = "manual";
+                address = result.address;
+                locationRegion = "";
+                updatePlateRegion();
+                locationStatus.textContent = `Выбранный адрес: ${address}. Проверьте место на снимках.`;
+                results.replaceChildren();
+                scheduleDraft();
+                updateButtons();
+            });
+            results.append(choice);
+        }
+    } catch (error) {
+        if (current === session) results.textContent = error.message;
+    }
+});
 cameraButton.addEventListener("click", () => openCamera("overview"));
 detailButton.addEventListener("click", () => openCamera("detail"));
 cameraSettingsButton.addEventListener("click", async () => {

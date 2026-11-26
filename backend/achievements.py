@@ -33,7 +33,7 @@ def backfill_achievements(connection):
         UNION
         SELECT owner_id, 'gps_capture' FROM reports JOIN report_captures ON report_id = reports.id
         WHERE owner_id IS NOT NULL AND submitted_at IS NOT NULL AND latitude IS NOT NULL
-            AND longitude IS NOT NULL AND captured_at IS NOT NULL
+            AND longitude IS NOT NULL AND captured_at IS NOT NULL AND COALESCE(location_source, 'geolocation') != 'manual'
         UNION
         SELECT owner_id, 'three_accepted' FROM reports WHERE owner_id IS NOT NULL AND (
             status = 'approved' OR EXISTS (

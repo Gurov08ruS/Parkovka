@@ -1,4 +1,4 @@
-import { request, initData, needsMax, loadSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, maxBotLink, showSiteVersion } from "./ui.js";
+import { request, loadSession, element, statusMessage, profileAvatar, button, submitButton, field, formHandler, panelLink, showSiteVersion } from "./ui.js";
 import { appendReportDetails, reportCard, decisionStats, reviewPageUrl, statuses, REPORT_ID } from "./report-view.js";
 
 const content = document.getElementById("review-content");
@@ -26,22 +26,13 @@ async function refreshStorageWarning(current) {
     if (current === version) storageTimer = setTimeout(() => refreshStorageWarning(current), 60_000);
 }
 
-function showLogin({ mode, user }) {
+function showLogin() {
     const form = element("form", "", "panel-stack");
     const message = statusMessage();
-    if (user) {
-        title.textContent = "Вход для проверяющего";
-        form.append(field("Секрет проверяющего", "key", { type: "password", required: true }));
-        formHandler(form, message, "/api/reviewer", loadPage);
-    } else {
-        title.textContent = "Вход в аккаунт";
-        if (needsMax({ mode, user })) {
-            content.replaceChildren(statusMessage("Откройте бота в MAX, чтобы зарегистрироваться и войти."), maxBotLink());
-            return;
-        }
-        formHandler(form, message, "/api/session", loadPage, () => mode === "test" ? {} : { init_data: initData() });
-    }
-    form.append(submitButton(user ? "Войти" : mode === "test" ? "Войти в тестовом режиме" : "Войти через MAX"), message);
+    title.textContent = "Вход для проверяющего";
+    form.append(field("Секрет проверяющего", "key", { type: "password", required: true }));
+    formHandler(form, message, "/api/reviewer", loadPage);
+    form.append(submitButton("Войти"), message);
     content.replaceChildren(form);
 }
 
@@ -49,7 +40,7 @@ async function showAccount(user, current) {
     const message = statusMessage("Загружаем статистику…");
     account.hidden = false;
     account.replaceChildren(
-        element("h2", `${user.first_name} ${user.last_name}`.trim() || `ID MAX: ${user.max_id}`),
+        element("h2", `${user.first_name} ${user.last_name}`.trim() || "Проверяющий"),
         element("p", "Мои решения"),
         message,
     );
@@ -151,6 +142,13 @@ async function showReport(current) {
     const details = element("article", "", "panel-stack capture-section");
     appendReportDetails(details, report, path, reviewPageUrl);
     const actions = element("div", "", "panel-stack");
+    if (report.plate_number && report.plate_verification !== "verified") {
+        const form = element("form", "", "panel-stack capture-section");
+        const message = statusMessage();
+        form.append(element("p", "Проверьте госномер и код региона по фотографиям."), submitButton("Подтвердить номер"), message);
+        formHandler(form, message, `${path}/confirm-plate`, loadPage);
+        actions.append(form);
+    }
     if (["pending", "under_review"].includes(report.status)) actions.append(reviewForm(report, path));
     actions.append(authorControls(report, path));
     const columns = element("div", "", "review-columns");

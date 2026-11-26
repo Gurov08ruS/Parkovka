@@ -22,7 +22,7 @@ TRANSITIONS = {
 }
 REPORT_QUERY = """
     SELECT reports.id, CASE WHEN withdrawn_at IS NOT NULL THEN 'withdrawn' ELSE reports.status END AS status,
-           latitude, longitude, plate_number, plate_source, plate_verification, plate_region, plate_region_source,
+           latitude, longitude, location_source, plate_number, plate_source, plate_verification, plate_region, plate_region_source,
            comment, created_at, submitted_at, withdrawn_at,
            address, captured_at, captures.report_id IS NOT NULL AS has_photo,
            detail_photo IS NOT NULL AS has_detail_photo,
@@ -75,6 +75,7 @@ def initialize_database(database):
                 "plate_number": "TEXT", "plate_source": "TEXT", "plate_verification": "TEXT", "withdrawn_at": "TEXT",
                 "plate_region": "TEXT", "plate_region_source": "TEXT",
                 "deleted_at": "TEXT", "deleted_capture_id": "TEXT",
+                "location_source": "TEXT",
             }),
             ("report_events", {
                 "account_ban": "INTEGER NOT NULL DEFAULT 0 CHECK (account_ban IN (0, 1))",
@@ -237,6 +238,9 @@ def save_capture(connection, data, owner_id, *, draft=False):
                detail_photo = excluded.detail_photo, captured_at = excluded.captured_at""",
         (identifier, capture_id, address, photo, detail, captured_at),
     )
+    connection.execute("UPDATE reports SET location_source = ? WHERE id = ?", (
+        "manual" if data.get("location_source") == "manual" else "geolocation", identifier,
+    ))
     if previous is None and data.get("offline_created") is True:
         award(connection, owner_id, "offline_sync")
     if detail is not None:
@@ -251,7 +255,7 @@ def save_capture(connection, data, owner_id, *, draft=False):
             (identifier, owner_id),
         )
         award(connection, owner_id, "first_report")
-        if captured_at is not None:
+        if captured_at is not None and data.get("location_source") != "manual":
             award(connection, owner_id, "gps_capture")
     return visible_report(connection, identifier, {"id": owner_id}, False), previous is None
 
@@ -433,4 +437,14 @@ def change_status(connection, identifier, account, data):
     if status == "approved":
         owner_id = connection.execute("SELECT owner_id FROM reports WHERE id = ?", (identifier,)).fetchone()[0]
         award_accepted_reports(connection, owner_id)
+    return report_detail(connection, identifier, account, reviewer=True)
+
+
+def confirm_plate(connection, identifier, account):
+    connection.execute("BEGIN IMMEDIATE")
+    ensure_active(connection, account["id"])
+    report = visible_report(connection, identifier, account, reviewer=True)
+    if not report["plate_number"]:
+        raise ApiError(HTTPStatus.CONFLICT, "Госномер не указан.")
+    connection.execute("UPDATE reports SET plate_verification = 'verified' WHERE id = ?", (identifier,))
     return report_detail(connection, identifier, account, reviewer=True)

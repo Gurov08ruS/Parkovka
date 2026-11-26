@@ -66,8 +66,8 @@ export function reportCard(report, path, control, banLink) {
     card.append(heading, element("small", `${placeLabel(report)} · ${dateLabel(report.submitted_at || report.created_at)}`));
     appendBanNotice(card, report, banLink);
     if (report.plate_number) {
-        const plate = element("p", `Госномер: ${plateLabel(report)} · Не подтверждён`, "report-plate-summary");
-        if (report.plate_region_source === "location") plate.append(element("small", "Регион предположен по месту съёмки"));
+        const plate = element("p", `Госномер: ${plateLabel(report)} · ${report.plate_verification === "verified" ? "Подтверждён" : "Не подтверждён"}`, "report-plate-summary");
+        if (report.plate_region_source === "location" && report.plate_verification !== "verified") plate.append(element("small", "Регион предположен по месту съёмки"));
         card.append(plate);
     }
     if (report.has_photo) {
@@ -92,11 +92,12 @@ export function appendReportDetails(container, report, path, banLink) {
         element("p", placeLabel(report)),
         element("p", `Создано ${dateLabel(report.created_at)}`),
     );
+    if (report.location_source === "manual") container.append(element("p", "Место выбрано по адресу вручную"));
     if (report.captured_at) container.append(element("p", `Снято ${dateLabel(report.captured_at)}`));
     if (report.plate_number) {
         const plate = element("div", "", "report-plate-summary");
-        plate.append(element("strong", plateLabel(report)), element("span", "Не подтверждён"));
-        if (report.plate_region_source === "location") plate.append(element("small", "Регион предположен по месту съёмки"));
+        plate.append(element("strong", plateLabel(report)), element("span", report.plate_verification === "verified" ? "Подтверждён" : "Не подтверждён"));
+        if (report.plate_region_source === "location" && report.plate_verification !== "verified") plate.append(element("small", "Регион предположен по месту съёмки"));
         container.append(plate);
     }
     if (report.comment) container.append(element("p", report.comment, "report-comment"));

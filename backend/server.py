@@ -17,6 +17,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
@@ -56,7 +57,7 @@ from database import DatabaseKeyError, database_has_data, migrate_plaintext, sql
 from plates import LOCATION_CODES, normalize_region
 from report_notifications import report_notifications
 from reports import (
-    MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, coordinates, create_draft, delete_draft,
+    MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, confirm_plate, coordinates, create_draft, delete_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
     reviewer_decision_stats, save_capture, set_author_ban, withdraw_report,
 )
@@ -73,6 +74,7 @@ STATUS_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/status")
 BAN_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/author-ban")
 WITHDRAW_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/withdraw")
 DELETE_DRAFT_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/delete-draft")
+PLATE_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/confirm-plate")
 CAMERA_TICKET = re.compile(r"[A-Za-z0-9_-]{43}")
 DEVICE_DIAGNOSTICS = {
     "/api/diagnostics/camera": ("camera", log_camera_error),
@@ -82,7 +84,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
@@ -151,6 +153,8 @@ class AppServer(ThreadingHTTPServer):
         self.session_profiles = SessionProfiles()
         self.max_profiles = SessionProfiles()
         self.camera_handoffs = SessionProfiles(limit=1024)
+        self.reviewer_attempts = []
+        self.reviewer_attempts_lock = Lock()
         self.commit_id = git_commit_id()
         super().__init__(*args, **kwargs)
 
@@ -372,11 +376,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         ban_route = BAN_ROUTE.fullmatch(path)
         withdraw_route = WITHDRAW_ROUTE.fullmatch(path)
         delete_draft_route = DELETE_DRAFT_ROUTE.fullmatch(path)
+        plate_route = PLATE_ROUTE.fullmatch(path)
         diagnostic = DEVICE_DIAGNOSTICS.get(path)
         if path not in {
             "/api/session", "/api/session/camera", "/api/camera/handoff", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
-            REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH, "/api/achievements/rules",
-        } and not (status_route or ban_route or withdraw_route or delete_draft_route or diagnostic):
+            REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH, "/api/achievements/rules", "/api/geocode/search",
+        } and not (status_route or ban_route or withdraw_route or delete_draft_route or plate_route or diagnostic):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
@@ -391,7 +396,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH) else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
-                self.post_api(path, status_route, ban_route, withdraw_route, delete_draft_route, data, connection)
+                self.post_api(path, status_route, ban_route, withdraw_route, delete_draft_route, plate_route, data, connection)
         except ApiError as error:
             self.send_error(error.status, str(error))
         except AccountBanned as error:
@@ -414,7 +419,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.max_bot.handle_update(self.read_json(MAX_WEBHOOK_BODY_BYTES))
         self.send_json(HTTPStatus.OK, {"ok": True})
 
-    def post_api(self, path, status_route, ban_route, withdraw_route, delete_draft_route, data, connection):
+    def post_api(self, path, status_route, ban_route, withdraw_route, delete_draft_route, plate_route, data, connection):
         old_token = self.request_session_token()
         token_hash = session_token_hash(old_token)
         if path == "/api/session/camera":
@@ -469,7 +474,55 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, self.session_data(None), *headers)
             return
 
-        account = self.account(connection, reviewer=status_route is not None or ban_route is not None)
+        if path == "/api/reviewer":
+            secret = data.get("key")
+            valid = bool(self.reviewer_key and isinstance(secret, str)
+                         and hmac.compare_digest(secret.encode(), self.reviewer_key.encode()))
+            with self.server.reviewer_attempts_lock:
+                now = time.monotonic()
+                attempts = [attempt for attempt in self.server.reviewer_attempts if attempt > now - 900]
+                if len(attempts) >= 10:
+                    raise ApiError(HTTPStatus.TOO_MANY_REQUESTS, "Слишком много попыток. Повторите через 15 минут.")
+                if not valid:
+                    attempts.append(now)
+                self.server.reviewer_attempts = attempts
+            if not valid:
+                raise ApiError(HTTPStatus.FORBIDDEN, "Неверный секрет проверяющего.")
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                account = session_account(connection, token_hash, self.source)
+                token = None
+                if account is None:
+                    token, account = create_session(connection, self.source, "reviewer-account", None)
+                    token_hash = session_token_hash(token)
+                ensure_active(connection, account["id"])
+                connection.execute("UPDATE sessions SET review_grant = ? WHERE token_hash = ?", (self.review_grant, token_hash))
+                account = session_account(connection, token_hash, self.source)
+            headers = (self.session_cookie(token, max(0, account["expires_at"] - int(time.time()))),) if token else ()
+            self.send_json(HTTPStatus.OK, self.session_data(account, token_hash), *headers)
+            return
+
+        account = self.account(connection, reviewer=status_route is not None or ban_route is not None or plate_route is not None)
+        if path == "/api/geocode/search":
+            query = clean_text(data.get("query", ""), "Адрес", 200, required=True)
+            if len(query) < 3:
+                raise ValueError("Введите не менее трёх символов адреса.")
+            request = Request(f"{PHOTON_URL}/api/?{urlencode({'q': query, 'limit': 5})}", headers={"Accept": "application/json", "User-Agent": "Stukach/0.1"})
+            try:
+                with urlopen(request, timeout=5) as response:
+                    features = json.loads(response.read(128 * 1024))["features"]
+                results = []
+                for feature in features:
+                    props = feature["properties"]
+                    longitude, latitude = feature["geometry"]["coordinates"]
+                    coordinates({"latitude": latitude, "longitude": longitude})
+                    address = ", ".join(dict.fromkeys(filter(None, (props.get("name"), props.get("street"), props.get("housenumber"), props.get("city"), props.get("state")))))
+                    if address:
+                        results.append({"address": address, "latitude": latitude, "longitude": longitude})
+            except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
+                raise ApiError(HTTPStatus.BAD_GATEWAY, "Поиск адреса временно недоступен.") from None
+            self.send_json(HTTPStatus.OK, {"results": results})
+            return
         if path == "/api/achievements/rules":
             with connection:
                 award(connection, account["id"], "rules_read")
@@ -498,20 +551,6 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, self.session_data(account))
             return
 
-        if path == "/api/reviewer":
-            secret = data.get("key")
-            if not (self.reviewer_key and isinstance(secret, str)
-                    and hmac.compare_digest(secret.encode(), self.reviewer_key.encode())):
-                raise ApiError(HTTPStatus.FORBIDDEN, "Неверный секрет проверяющего.")
-            with connection:
-                connection.execute("BEGIN IMMEDIATE")
-                ensure_active(connection, account["id"])
-                connection.execute(
-                    "UPDATE sessions SET review_grant = ? WHERE token_hash = ?", (self.review_grant, token_hash),
-                )
-            self.send_json(HTTPStatus.OK, self.session_data(self.account(connection)))
-            return
-
         if path == "/api/geocode":
             location = coordinates(data)
             try:
@@ -521,8 +560,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, result)
             return
 
-        if status_route or ban_route or withdraw_route or delete_draft_route:
-            identifier = int((status_route or ban_route or withdraw_route or delete_draft_route)[1])
+        if status_route or ban_route or withdraw_route or delete_draft_route or plate_route:
+            identifier = int((status_route or ban_route or withdraw_route or delete_draft_route or plate_route)[1])
             if identifier > MAX_REPORT_ID:
                 raise ApiError(HTTPStatus.NOT_FOUND, "Обращение не найдено.")
             with connection:
@@ -532,6 +571,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                     report = set_author_ban(connection, identifier, account, data)
                 elif withdraw_route:
                     report = withdraw_report(connection, identifier, account)
+                elif plate_route:
+                    report = confirm_plate(connection, identifier, account)
                 else:
                     report = delete_draft(connection, identifier, account)
             self.send_json(HTTPStatus.OK, report)

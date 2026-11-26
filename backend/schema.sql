@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS reports (
     status TEXT NOT NULL DEFAULT 'draft',
     latitude REAL CHECK (latitude BETWEEN -90 AND 90),
     longitude REAL CHECK (longitude BETWEEN -180 AND 180),
+    location_source TEXT,
     plate_number TEXT,
     plate_source TEXT,
     plate_verification TEXT,
