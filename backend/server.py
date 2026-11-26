@@ -78,9 +78,9 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-PHOTON_URL = os.environ.get("STUKACH_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
-DEFAULT_DATABASE = Path(__file__).parent / "data" / "stukach.encrypted.sqlite3"
-LEGACY_DATABASE = Path(__file__).parent / "data" / "stukach.sqlite3"
+PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
+DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
+LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
 FRONTEND = Path(__file__).parent.parent / "frontend"
 
 
@@ -552,16 +552,16 @@ def main():
     if (options.cert is None) != (options.key is None):
         parser.error("Параметры --cert и --key нужно указывать вместе.")
 
-    bot_token = os.environ.get("STUKACH_MAX_BOT_TOKEN")
-    public_url = os.environ.get("STUKACH_MAX_PUBLIC_URL")
+    bot_token = os.environ.get("PARKOVKA_MAX_BOT_TOKEN")
+    public_url = os.environ.get("PARKOVKA_MAX_PUBLIC_URL")
     if options.register_max_webhook and (not bot_token or not public_url):
-        parser.error("Для регистрации задайте STUKACH_MAX_BOT_TOKEN и STUKACH_MAX_PUBLIC_URL.")
+        parser.error("Для регистрации задайте PARKOVKA_MAX_BOT_TOKEN и PARKOVKA_MAX_PUBLIC_URL.")
     if options.bot and not bot_token:
-        parser.error("Для запуска с --bot задайте STUKACH_MAX_BOT_TOKEN.")
+        parser.error("Для запуска с --bot задайте PARKOVKA_MAX_BOT_TOKEN.")
     max_bot = None
     if options.bot or options.register_max_webhook:
         try:
-            max_bot = MaxBot(bot_token, ca_file=os.environ.get("STUKACH_MAX_CA_FILE") or None)
+            max_bot = MaxBot(bot_token, ca_file=os.environ.get("PARKOVKA_MAX_CA_FILE") or None)
         except MaxApiError as error:
             raise SystemExit(f"Не удалось настроить бота MAX: {error}") from None
 
@@ -579,7 +579,7 @@ def main():
         tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls.load_cert_chain(options.cert, options.key)
 
-    reviewer_key = os.environ.get("STUKACH_REVIEW_KEY")
+    reviewer_key = os.environ.get("PARKOVKA_REVIEW_KEY")
     generated_key = None
     if options.test and not reviewer_key:
         reviewer_key = generated_key = secrets.token_urlsafe(18)

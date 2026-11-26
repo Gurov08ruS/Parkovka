@@ -64,7 +64,7 @@ class ServerLogs:
         self.location = self.create_logger("location", max_bytes=256 * 1024, backups=2)
 
     def create_logger(self, name, *, max_bytes, backups):
-        logger = logging.Logger(f"stukach.{name}", level=logging.INFO)
+        logger = logging.Logger(f"parkovka.{name}", level=logging.INFO)
         handler = LogFileHandler(
             self.directory / f"{name}.log", maxBytes=max_bytes, backupCount=backups, encoding="utf-8", delay=True,
         )

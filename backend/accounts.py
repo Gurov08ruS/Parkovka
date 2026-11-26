@@ -9,8 +9,8 @@ from threading import Lock
 from urllib.parse import parse_qsl, urlsplit
 
 
-COOKIE_NAME = "stukach_session"
-MAX_COOKIE_NAME = "__Host-stukach_max_session"
+COOKIE_NAME = "parkovka_session"
+MAX_COOKIE_NAME = "__Host-parkovka_max_session"
 SESSION_SECONDS = 8 * 60 * 60
 SIGNATURE_SECONDS = 60 * 60
 MAX_ID = re.compile(r"[1-9][0-9]{0,18}")

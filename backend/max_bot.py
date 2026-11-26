@@ -27,7 +27,7 @@ class MaxApiError(Exception):
 
 
 def webhook_url(public_url):
-    message = "STUKACH_MAX_PUBLIC_URL должен быть публичным HTTPS-адресом корня сайта без указания порта."
+    message = "PARKOVKA_MAX_PUBLIC_URL должен быть публичным HTTPS-адресом корня сайта без указания порта."
     try:
         url = urlsplit(public_url)
         valid = (url.scheme == "https" and url.hostname and url.username is None and url.password is None
@@ -76,7 +76,7 @@ class MaxBot:
         try:
             self.tls = ssl.create_default_context(cafile=ca_file)
         except OSError:
-            raise MaxApiError("Не удалось загрузить сертификаты из STUKACH_MAX_CA_FILE.") from None
+            raise MaxApiError("Не удалось загрузить сертификаты из PARKOVKA_MAX_CA_FILE.") from None
         self.secret = hmac.new(token.encode(), b"Stukach MAX webhook v1", hashlib.sha256).hexdigest()
         self.bot_id = None
         self.lock = Lock()
@@ -101,7 +101,7 @@ class MaxBot:
             if isinstance(error.reason, ssl.SSLCertVerificationError):
                 raise MaxApiError(
                     "Не удалось проверить сертификат MAX API. "
-                    "Укажите доверенные сертификаты Минцифры в STUKACH_MAX_CA_FILE."
+                    "Укажите доверенные сертификаты Минцифры в PARKOVKA_MAX_CA_FILE."
                 ) from None
             raise MaxApiError("Не удалось подключиться к MAX API.") from None
         except (OSError, ValueError, RecursionError):
