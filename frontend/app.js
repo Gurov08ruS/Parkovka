@@ -10,6 +10,8 @@ const maxLogin = $("max-login");
 const browserNotice = $("browser-max-notice");
 const panel = $("panel-dialog");
 const panelContent = $("tab-content");
+const profileTabIcon = $("open-profile").firstElementChild;
+const defaultProfileIcon = profileTabIcon.firstElementChild;
 const tabTitles = { home: "Главная", history: "Мои обращения", achievements: "Мои достижения", profile: "Мой аккаунт" };
 let currentTab = "home";
 let tabAnimation;
@@ -44,7 +46,13 @@ function showSessionError(content, error, retry) {
 }
 
 function setSession(data) {
+    const previousUser = session?.user;
+    const user = data.user;
     session = data;
+    if (previousUser?.max_id !== user?.max_id || previousUser?.first_name !== user?.first_name
+        || previousUser?.last_name !== user?.last_name || previousUser?.photo_url !== user?.photo_url) {
+        profileTabIcon.replaceChildren(user ? profileAvatar(user, "П") : defaultProfileIcon);
+    }
     browserNotice.hidden = !needsMax(data);
     if (data.mode === "max" && initData() && !bridge) {
         bridge = new Promise((resolve) => {
@@ -232,7 +240,9 @@ function showProfile() {
     panelContent.append(menu);
 
     if (!user) {
-        panelContent.append(button("Войти в аккаунт", () => requireAccount(showProfile), true));
+        const login = button("Войти в аккаунт", () => requireAccount(showProfile), true);
+        login.id = "profile-login";
+        panelContent.append(login);
     }
     if (session?.review_enabled) {
         const label = user?.reviewer ? "Кабинет проверяющего" : "Вход для проверяющего";

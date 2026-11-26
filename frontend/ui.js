@@ -88,8 +88,10 @@ export function statusMessage(text = "") {
     return message;
 }
 
-export function profileAvatar(profile) {
-    const avatar = element("span", profile?.first_name?.slice(0, 1).toUpperCase() || "○", "profile-avatar");
+export function profileAvatar(profile, fallback = "○") {
+    const letter = profile?.first_name?.match(/\p{L}/u)?.[0] || profile?.last_name?.match(/\p{L}/u)?.[0] || fallback;
+    const [initial] = letter.toUpperCase();
+    const avatar = element("span", initial, "profile-avatar");
     avatar.setAttribute("aria-hidden", "true");
     if (profile?.photo_url) {
         const photo = element("img");
