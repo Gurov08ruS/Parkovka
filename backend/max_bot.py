@@ -79,7 +79,9 @@ class MaxBot:
     def __init__(self, token, ca_file=None):
         self.token = token
         try:
-            self.tls = ssl.create_default_context(cafile=ca_file)
+            self.tls = ssl.create_default_context()
+            if ca_file:
+                self.tls.load_verify_locations(cafile=ca_file)
         except OSError:
             raise MaxApiError("Не удалось загрузить сертификаты из PARKOVKA_MAX_CA_FILE.") from None
         self.secret = hmac.new(token.encode(), b"Stukach MAX webhook v1", hashlib.sha256).hexdigest()
@@ -212,7 +214,9 @@ class MaxBot:
         button = {"type": "link", "text": "Открыть обращение", "url": f"{self.miniapp_url}=report_{report_id}"}
         attachments = [self.upload_report_photo(photo) for photo in (report["photo"], report["detail_photo"]) if photo]
         attachments.append({"type": "inline_keyboard", "payload": {"buttons": [[button]]}})
-        self.api(f"/messages?{urlencode({'user_id': user_id})}", {"text": text, "attachments": attachments})
+        sent = self.api(f"/messages?{urlencode({'user_id': user_id})}", {"text": text, "attachments": attachments})
+        recipient = object_field(object_field(sent, "message"), "recipient")
+        self.remember_dialog(user_id, recipient.get("chat_id"))
 
     def handle_update(self, update):
         recipient = welcome_recipient(update)

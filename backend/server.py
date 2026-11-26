@@ -84,7 +84,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
@@ -247,6 +247,10 @@ class AppHandler(SimpleHTTPRequestHandler):
         if account is not None:
             if self.source == "max":
                 profile = self.server.max_profiles.get(account["max_id"])
+                if profile is None and self.max_bot:
+                    profile = self.max_bot.author_profile(account["max_id"])
+                    if profile:
+                        self.server.max_profiles.put(account["max_id"], account["expires_at"], profile)
                 first_name, last_name, photo_url, _ = profile or ("", "", None, None)
             else:
                 token_hash = token_hash or session_token_hash(self.request_session_token())
