@@ -97,6 +97,7 @@ let openingCamera = false;
 let saving = false;
 let openCameraSettings;
 let browserCameraGeneration = 0;
+let recognitionGeneration = 0;
 
 function maxPlatform() {
     return window.WebApp?.platform || new URLSearchParams(location.hash.slice(1)).get("WebAppPlatform") || "unknown";
@@ -731,6 +732,39 @@ function takePhoto() {
     stopCamera();
     scheduleDraft();
     photoPreviews.scrollIntoView({ block: "nearest" });
+    void recognizePlate(encoded, photoKind, session);
+}
+
+async function recognizePlate(encoded, kind, currentSession) {
+    const generation = ++recognitionGeneration;
+    if (!navigator.onLine) {
+        cameraStatus.textContent = "Снимок сохранён. Номер проверим после подключения к интернету.";
+        return;
+    }
+    cameraStatus.textContent = "Ищем госномер на снимке…";
+    try {
+        const result = await request("/api/plates/detect", { photo: encoded });
+        if (session !== currentSession || generation !== recognitionGeneration || (kind === "overview" ? photo : detailPhoto) !== encoded) return;
+        if (!result.found) {
+            cameraStatus.textContent = "Госномер не найден. Переснимите фото или снимите номер крупнее на втором фото.";
+        } else if (result.multiple) {
+            cameraStatus.textContent = "Найдено несколько номеров. Снимите нужный номер крупнее на втором фото.";
+        } else if (result.plate) {
+            if (!plateNumber.value) {
+                plateNumber.value = result.plate;
+                if (!plateRegion.value) plateRegion.value = result.region;
+            }
+            updatePlateRegion();
+            scheduleDraft();
+            cameraStatus.textContent = "Номер распознан. Проверьте его перед отправкой обращения.";
+        } else {
+            cameraStatus.textContent = "Номер найден, но прочитать его не удалось. Укажите номер вручную или переснимите фото крупнее.";
+        }
+    } catch (error) {
+        if (session === currentSession && generation === recognitionGeneration && (kind === "overview" ? photo : detailPhoto) === encoded) {
+            cameraStatus.textContent = `Не удалось проверить номер: ${error.message}`;
+        }
+    }
 }
 
 function capturePayload(regions = null) {

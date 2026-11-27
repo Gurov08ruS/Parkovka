@@ -55,9 +55,10 @@ except ImportError as error:
 
 from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
 from plates import LOCATION_CODES, normalize_region
+from plate_recognition import RecognitionUnavailable, analyze
 from report_notifications import report_notifications
 from reports import (
-    MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, confirm_plate, coordinates, create_draft, delete_draft,
+    MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, confirm_plate, coordinates, create_draft, decode_photo, delete_draft,
     initialize_database, list_reports, open_database, report_detail, report_photo,
     reviewer_decision_stats, save_capture, set_author_ban, withdraw_report,
 )
@@ -84,7 +85,8 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.8.0"
+VERSION = "0.9.0"
+PLATE_DETECT_PATH = "/api/plates/detect"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
 LEGACY_DATABASE = Path(__file__).parent / "data" / "parkovka.sqlite3"
@@ -384,7 +386,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         diagnostic = DEVICE_DIAGNOSTICS.get(path)
         if path not in {
             "/api/session", "/api/session/camera", "/api/camera/handoff", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
-            REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH, "/api/achievements/rules", "/api/geocode/search",
+            REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH, PLATE_DETECT_PATH, "/api/achievements/rules", "/api/geocode/search",
         } and not (status_route or ban_route or withdraw_route or delete_draft_route or plate_route or diagnostic):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -397,7 +399,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 record(getattr(self.server.logs, device), self.read_json(1024))
                 self.send_json(HTTPStatus.OK, {"logged": True})
                 return
-            limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH) else MAX_BODY_BYTES
+            limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH, PLATE_DETECT_PATH) else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
                 self.post_api(path, status_route, ban_route, withdraw_route, delete_draft_route, plate_route, data, connection)
@@ -414,6 +416,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
         except ValueError as error:
             self.send_error(HTTPStatus.BAD_REQUEST, str(error))
+        except RecognitionUnavailable as error:
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(error))
 
     def receive_max_update(self):
         if self.max_bot is None:
@@ -507,6 +511,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None or plate_route is not None)
+        if path == PLATE_DETECT_PATH:
+            self.send_json(HTTPStatus.OK, analyze(decode_photo(data.get("photo"))))
+            return
         if path == "/api/geocode/search":
             query = clean_text(data.get("query", ""), "Адрес", 200, required=True)
             if len(query) < 3:
@@ -586,6 +593,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH):
                 if data.get("owner_max_id", account["max_id"]) != account["max_id"]:
                     raise ApiError(HTTPStatus.CONFLICT, "Войдите в аккаунт, в котором сделали снимок.")
+                if path == CAPTURE_PATH:
+                    images = [decode_photo(data.get("photo"))]
+                    if data.get("detail_photo") is not None:
+                        images.append(decode_photo(data["detail_photo"]))
+                    if not any(analyze(image)["found"] for image in images):
+                        raise ValueError("Госномер не найден на фотографиях. Переснимите фото так, чтобы номер был хорошо виден.")
                 report, created = save_capture(connection, data, account["id"], draft=path == DRAFT_CAPTURE_PATH)
             else:
                 report, created = create_draft(connection, data, account["id"]), True
