@@ -21,6 +21,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'backend'))
 from database import ensure_key, open_database
+from accounts import max_avatar_color
 from reports import initialize_database
 import profile_cache
 
@@ -81,6 +82,12 @@ class Server:
 
 
 class ProfileCacheTest(unittest.TestCase):
+    def test_max_avatar_color_uses_full_numeric_id(self):
+        self.assertEqual([max_avatar_color(str(value)) for value in (5, 6, 7, 8, 9)], [0, 1, 2, 3, 4])
+        self.assertEqual(max_avatar_color('9223372036854775807'), 2)
+        for value in (None, '', '0', '-1', 'reviewer-account', '12345678901234567890'):
+            self.assertIsNone(max_avatar_color(value))
+
     def test_existing_database_gains_profile_cache(self):
         with tempfile.TemporaryDirectory() as path:
             db = Path(path) / 'old.sqlite3'
@@ -106,6 +113,7 @@ class ProfileCacheTest(unittest.TestCase):
                         'photo_url': 'https://avatar.example/signed.png', 'profile_url': 'https://max.ru/u/example'}
                 response = client.call('/api/session', {'init_data': signed(data)})['user']
                 self.assertEqual((response['first_name'], response['last_name']), ('Анна', 'Иванова'))
+                self.assertEqual(response['avatar_color'], 1)
                 bad = signed({**data, 'first_name': 'Подмена'})
                 bad = bad[:-1] + ('0' if bad[-1] != '0' else '1')
                 client.call('/api/session', {'init_data': bad}, expected=401)
@@ -118,14 +126,18 @@ class ProfileCacheTest(unittest.TestCase):
                 client.base = server.base
                 own = client.call('/api/session')['user']
                 self.assertEqual((own['first_name'], own['last_name']), ('Анна', 'Иванова'))
+                self.assertEqual(own['avatar_color'], 1)
                 self.assertEqual(own['photo_url'], f'/api/public/users/{owner}/avatar')
                 public = Client(server.base)
                 profile = public.call(f'/api/public/users/{owner}')
                 self.assertEqual((profile['first_name'], profile['last_name']), ('Анна', 'Иванова'))
+                self.assertEqual(profile['avatar_color'], 1)
+                self.assertNotIn('max_id', profile)
                 self.assertEqual(profile['profile_url'], 'https://max.ru/u/example')
                 self.assertEqual(public.call(profile['photo_url']), PNG)
                 client.call('/api/reviewer', {'key': 'test-key'})
                 author = client.call('/api/review/1')['author']
+                self.assertEqual(author['avatar_color'], 1)
                 self.assertEqual((author['first_name'], author['last_name'], author['photo_url']),
                                  ('Анна', 'Иванова', f'/api/public/users/{owner}/avatar'))
                 update = {'id': 501, 'first_name': 'Анна-Мария', 'last_name': '', 'photo_url': None}

@@ -1050,3 +1050,11 @@ main {
 .public-user-text strong { overflow: hidden; text-overflow: ellipsis; }
 .report-filter { flex-wrap: wrap; }
 .report-filter .panel-button { flex: 1 0 auto; padding-inline: 9px; font-size: 14px; overflow-wrap: normal; white-space: nowrap; }
+.profile-avatar--max, .tab-profile-icon .profile-avatar--max {
+    border: 0;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--max-avatar-start), var(--max-avatar-end));
+    box-shadow: none;
+    color: #fff;
+    font-weight: 600;
+}

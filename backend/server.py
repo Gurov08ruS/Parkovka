@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 from accounts import (
     AccountBanned, COOKIE_NAME, MAX_COOKIE_NAME, SessionProfiles, clean_text, cookie_token, create_session,
-    ensure_active, profile_names, session_account, session_token_hash, verify_max,
+    ensure_active, max_avatar_color, profile_names, session_account, session_token_hash, verify_max,
 )
 from achievements import award, earned_achievements
 from device_logs import log_camera_error, log_location_error
@@ -94,7 +94,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.14.0"
+VERSION = "0.14.1"
 PLATE_DETECT_PATH = "/api/plates/detect"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
@@ -276,7 +276,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 first_name, last_name, photo_url = profile or ("Тестовый", "пользователь", None)
             user = {
                 "max_id": account["max_id"], "first_name": first_name, "last_name": last_name,
-                "photo_url": photo_url, "reviewer": self.is_reviewer(account),
+                "photo_url": photo_url, "avatar_color": max_avatar_color(account["max_id"]) if self.source == "max" else None,
+                "reviewer": self.is_reviewer(account),
             }
         return {"mode": self.source, "review_enabled": bool(self.reviewer_key), "user": user}
 
@@ -374,7 +375,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             max_id = user.pop("max_id")
             source = user.pop("source")
             first, last, photo, link = self.max_profile(connection, user["id"], max_id) if source == "max" else ("", "", None, None)
-            user.update(first_name=first, last_name=last, photo_url=photo, profile_url=link)
+            user.update(first_name=first, last_name=last, photo_url=photo, profile_url=link,
+                        avatar_color=max_avatar_color(max_id) if source == "max" else None)
             self.send_json(HTTPStatus.OK, user)
             return
         if path == "/api/public/reports":
@@ -446,7 +448,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 author = report["author"]
                 max_id = author["max_id"]
                 first_name, last_name, photo_url, profile_url = self.max_profile(connection, author["id"], max_id, prefer_live=True)
-                author.update(first_name=first_name, last_name=last_name, photo_url=photo_url, profile_url=profile_url)
+                author.update(first_name=first_name, last_name=last_name, photo_url=photo_url, profile_url=profile_url,
+                              avatar_color=max_avatar_color(max_id))
             self.send_json(HTTPStatus.OK, report)
 
     def do_POST(self):

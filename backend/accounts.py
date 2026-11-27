@@ -17,6 +17,13 @@ MAX_ID = re.compile(r"[1-9][0-9]{0,18}")
 MAX_PROFILE_PATH = re.compile(r"/u/[A-Za-z0-9_-]{1,160}/?")
 
 
+def max_avatar_color(max_id):
+    """MAX's five avatar gradients are selected by the numeric user ID."""
+    if not isinstance(max_id, str) or not MAX_ID.fullmatch(max_id):
+        return None
+    return int(max_id) % 5
+
+
 class AccountBanned(Exception):
     pass
 

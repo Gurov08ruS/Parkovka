@@ -119,6 +119,20 @@ export function profileAvatar(profile, fallback = "○") {
     const [initial] = letter.toUpperCase();
     const avatar = element("span", initial, "profile-avatar");
     avatar.setAttribute("aria-hidden", "true");
+    const colors = [
+        ["#fa82ba", "#e74aa6"], ["#ffb381", "#e5782d"], ["#1bd6e3", "#27a5c8"],
+        ["#79bcff", "#4289ed"], ["#9b90fe", "#6746ec"],
+    ];
+    let color = profile?.avatar_color;
+    // Compatibility with older session responses; BigInt preserves 64-bit MAX IDs.
+    if (!Number.isInteger(color) && /^[1-9][0-9]{0,18}$/.test(profile?.max_id || "")) {
+        try { color = Number(BigInt(profile.max_id) % BigInt(colors.length)); } catch { /* Keep the default avatar. */ }
+    }
+    if (Number.isInteger(color) && colors[color]) {
+        avatar.classList.add("profile-avatar--max");
+        avatar.style.setProperty("--max-avatar-start", colors[color][0]);
+        avatar.style.setProperty("--max-avatar-end", colors[color][1]);
+    }
     if (profile?.photo_url) {
         const photo = element("img");
         photo.alt = "";
