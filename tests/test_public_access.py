@@ -108,6 +108,7 @@ class PublicAccessTest(unittest.TestCase):
             visitor.call(f'/api/public/reports/{identifier}', expected=404)
             visitor.call(f'/api/public/reports/{identifier}/photos/overview', expected=404)
         other.call('/api/reports/10', expected=404)
+        self.assertEqual(owner.call('/api/reports/10')['author_id'], owners[0])
         other.call('/api/reports/10/visibility', {'is_public': True}, expected=404)
         visitor.call('/api/reports/10/visibility', {'is_public': True}, expected=401)
         owner.call('/api/reports/10/visibility', {'is_public': 'true'}, expected=400)
@@ -121,6 +122,12 @@ class PublicAccessTest(unittest.TestCase):
         profile = visitor.call(f'/api/public/users/{owners[0]}')
         self.assertEqual(profile['earned'], ['first_report'])
         self.assertEqual(profile['approved'], 2)
+        self.assertEqual(profile['rank'], 1)
+        self.assertEqual(visitor.call(f'/api/public/users/{owners[1]}')['rank'], 2)
+        history = visitor.call(f'/api/public/users/{owners[0]}/reports')['reports']
+        self.assertEqual([item['id'] for item in history], [10])
+        self.assertEqual(visitor.call(f'/api/public/users/{owners[1]}/reports')['reports'], [])
+        visitor.call('/api/public/users/9999/reports', expected=404)
         self.assertNotIn('max_id', profile)
         self.assertNotIn('source', profile)
         draft_body = {'capture_id': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',

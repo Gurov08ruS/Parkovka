@@ -27,16 +27,21 @@ def public_account(connection, source, identifier):
     result = dict(row)
     result["approved"] = connection.execute("""SELECT COUNT(*) FROM reports WHERE owner_id = ?
         AND status = 'approved' AND withdrawn_at IS NULL AND deleted_at IS NULL""", (identifier,)).fetchone()[0]
+    result["rank"] = next((index for index, entry in enumerate(leaderboard(connection, source), 1)
+                           if entry["id"] == identifier), None)
     result.update(earned_achievements(connection, identifier))
     return result
 
 
-def public_reports(connection, source, exclude_owner=None):
+def public_reports(connection, source, exclude_owner=None, *, owner=None):
     query = PUBLIC_QUERY + " WHERE " + PUBLIC_SCOPE
     params = [source]
     if exclude_owner is not None:
         query += " AND reports.owner_id != ?"
         params.append(exclude_owner)
+    if owner is not None:
+        query += " AND reports.owner_id = ?"
+        params.append(owner)
     query += " ORDER BY reports.submitted_at DESC, reports.id DESC"
     return [_sanitize(report_json(row)) for row in connection.execute(query, params)]
 

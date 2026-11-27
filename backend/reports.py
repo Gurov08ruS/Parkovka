@@ -312,6 +312,8 @@ def visible_report(connection, identifier, account, reviewer):
 
 def report_detail(connection, identifier, account, reviewer):
     report = visible_report(connection, identifier, account, reviewer)
+    if not reviewer:
+        report["author_id"] = account["id"]
     if not reviewer and report["status"] == "draft" and report["has_photo"]:
         row = connection.execute("SELECT capture_id FROM report_captures WHERE report_id = ?", (identifier,)).fetchone()
         if row is not None:

@@ -408,6 +408,7 @@ async function showPublicProfile(identifier, back = showAchievements) {
         const identity = element("div", "", "profile-card");
         const text = element("div");
         text.append(element("strong", publicName(user)), element("p", `Принято обращений: ${user.approved}`));
+        if (user.rank != null) text.append(element("p", `Место в рейтинге: ${user.rank}`));
         identity.append(profileAvatar(user, "П"), text);
         panelContent.append(identity);
         if (user.profile_url) {
@@ -419,6 +420,25 @@ async function showPublicProfile(identifier, back = showAchievements) {
         const { grid, progress } = achievementGrid();
         markAchievements(progress, user.earned);
         panelContent.append(element("h2", "Достижения"), grid);
+        const history = element("section", "", "public-profile-history");
+        const historyStatus = statusMessage("Загружаем обращения…");
+        history.append(element("h2", "Публичные обращения"), historyStatus);
+        panelContent.append(history);
+        try {
+            const { reports } = await request(`/api/public/users/${identifier}/reports`);
+            if (!activePanel(version)) return;
+            if (!reports.length) {
+                historyStatus.textContent = "У участника пока нет публичных обращений.";
+            } else {
+                historyStatus.remove();
+                for (const report of reports) {
+                    const control = button("Подробнее об обращении", () => showDetails(report.id, "public", () => showPublicProfile(identifier, back)));
+                    history.append(reportCard(report, `/api/public/reports/${report.id}`, control));
+                }
+            }
+        } catch (error) {
+            if (activePanel(version)) historyStatus.textContent = error.message;
+        }
     } catch (error) {
         if (activePanel(version)) message.textContent = error.message;
     }
@@ -429,11 +449,24 @@ async function showAchievements() {
     const { grid, progress } = achievementGrid(true);
     const message = statusMessage("Загружаем достижения…");
     const ranking = element("section", "", "leaderboard");
+    ranking.id = "leaderboard";
+    ranking.tabIndex = -1;
     ranking.append(element("h2", "Рейтинг пользователей"), element("p", "По числу принятых обращений", "ranking-subtitle"));
     const rankingList = element("div", "", "ranking-list");
     const rankingStatus = statusMessage("Загружаем рейтинг…");
     ranking.append(rankingStatus, rankingList);
-    panelContent.append(message, grid, ranking);
+    const rankingShortcut = button("", () => {
+        ranking.focus({ preventScroll: true });
+        ranking.scrollIntoView({ block: "start" });
+    });
+    rankingShortcut.classList.add("leaderboard-shortcut");
+    rankingShortcut.setAttribute("aria-controls", "leaderboard");
+    const shortcutText = element("span", "", "leaderboard-shortcut-text");
+    shortcutText.append(element("strong", "Рейтинг пользователей"), element("small", "По принятым обращениям"));
+    const arrow = element("span", "↓", "leaderboard-shortcut-arrow");
+    arrow.setAttribute("aria-hidden", "true");
+    rankingShortcut.append(element("span", "🏆", "leaderboard-shortcut-icon"), shortcutText, arrow);
+    panelContent.append(message, rankingShortcut, grid, ranking);
     void loadLeaderboard(version, rankingStatus, rankingList);
     try {
         const data = await loadSession();
@@ -534,10 +567,10 @@ function reportConfirmation(label, text, submit, path, onSuccess) {
     return confirmation;
 }
 
-async function showDetails(identifier, filter = "sent") {
+async function showDetails(identifier, filter = "sent", back = null) {
     const version = openPanel(`Обращение №${identifier}`);
     const message = statusMessage("Загружаем обращение…");
-    panelContent.append(button("К списку", () => navigate("history", undefined, filter)), message);
+    panelContent.append(button("К списку", back || (() => navigate("history", undefined, filter))), message);
     const path = `${filter === "public" ? "/api/public/reports" : "/api/reports"}/${identifier}`;
     try {
         const report = await request(path);
@@ -549,8 +582,10 @@ async function showDetails(identifier, filter = "sent") {
             link.searchParams.set("filter", "public");
             link.searchParams.set("report", identifier);
             link.hash = "";
-            panelContent.append(publicUserButton(report.author_id, () => showDetails(identifier, "public")));
+            panelContent.append(publicUserButton(report.author_id, () => showDetails(identifier, "public", back)));
             panelContent.append(panelLink("Ссылка на публичное обращение", link.href));
+        } else if (report.author_id != null) {
+            panelContent.append(publicUserButton(report.author_id, () => showDetails(identifier, filter), "Автор обращения"));
         }
         appendReportDetails(panelContent, report, path);
         if (filter === "public") return;
@@ -666,6 +701,7 @@ function tabUrl(tab, filter) {
     if (tab === "history" && ["drafts", "public"].includes(filter)) url.searchParams.set("filter", filter);
     else url.searchParams.delete("filter");
     url.searchParams.delete("report");
+    url.searchParams.delete("user");
     url.searchParams.delete("review");
     return url;
 }
@@ -687,6 +723,8 @@ function renderLocation() {
     const filter = ["drafts", "public"].includes(params.get("filter")) ? params.get("filter") : "sent";
     const identifier = filter === "public" && REPORT_ID.test(params.get("report") || "") ? params.get("report") : undefined;
     renderTab(tab, identifier, filter);
+    const profile = params.get("user") || "";
+    if (tab === "achievements" && REPORT_ID.test(profile)) void showPublicProfile(profile);
 }
 
 for (const tab of Object.keys(tabTitles)) {

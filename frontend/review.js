@@ -81,6 +81,13 @@ function authorControls(report, path) {
         element("h3", "Автор обращения"),
         identity,
     );
+    if (REPORT_ID.test(String(author.id))) {
+        const publicProfile = new URL("/", location.href);
+        publicProfile.searchParams.set("tab", "achievements");
+        publicProfile.searchParams.set("user", author.id);
+        publicProfile.hash = "";
+        card.append(panelLink("Посмотреть достижения и обращения", publicProfile.href));
+    }
     if (author.profile_url) {
         const link = panelLink("Открыть профиль в MAX", author.profile_url);
         link.target = "_blank";

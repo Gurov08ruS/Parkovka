@@ -1029,6 +1029,14 @@ main {
 .visibility-setting span { display: grid; gap: 4px; }
 .visibility-setting small { color: var(--muted); line-height: 1.4; }
 .leaderboard { display: grid; gap: 10px; margin-top: 20px; }
+.leaderboard { scroll-margin-top: 16px; }
+.leaderboard-shortcut.panel-button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 15px; text-align: left; }
+.leaderboard-shortcut-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 14px; background: var(--glass-surface); font-size: 23px; }
+.leaderboard-shortcut-text { display: grid; flex: 1; min-width: 0; }
+.leaderboard-shortcut-text strong { color: var(--deep-blue); }
+.leaderboard-shortcut-text small { color: var(--muted); }
+.leaderboard-shortcut-arrow { color: var(--blue); font-size: 24px; }
+.public-profile-history { display: grid; gap: 12px; margin-top: 12px; }
 .leaderboard h2, .leaderboard p { margin: 0; }
 .ranking-subtitle { color: var(--muted); }
 .ranking-list { display: grid; gap: 8px; }

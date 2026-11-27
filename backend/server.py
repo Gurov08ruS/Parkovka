@@ -80,6 +80,7 @@ DELETE_DRAFT_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/delete-draft")
 PLATE_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/confirm-plate")
 VISIBILITY_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/visibility")
 PUBLIC_USER_ROUTE = re.compile(rf"/api/public/users/{REPORT_ID}")
+PUBLIC_USER_REPORTS_ROUTE = re.compile(rf"/api/public/users/{REPORT_ID}/reports")
 PUBLIC_REPORT_ROUTE = re.compile(rf"/api/public/reports/{REPORT_ID}(?:/photos/(overview|detail)(/boxes)?)?")
 CAMERA_TICKET = re.compile(r"[A-Za-z0-9_-]{43}")
 DEVICE_DIAGNOSTICS = {
@@ -90,7 +91,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.12.0"
+VERSION = "0.12.1"
 PLATE_DETECT_PATH = "/api/plates/detect"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
@@ -341,6 +342,13 @@ class AppHandler(SimpleHTTPRequestHandler):
     def get_api(self, path, connection):
         if path == "/api/public/leaderboard":
             self.send_json(HTTPStatus.OK, {"users": leaderboard(connection, self.source)})
+            return
+        public_user_reports = PUBLIC_USER_REPORTS_ROUTE.fullmatch(path)
+        if public_user_reports and int(public_user_reports[1]) <= MAX_REPORT_ID:
+            identifier = int(public_user_reports[1])
+            if not connection.execute("SELECT 1 FROM accounts WHERE source = ? AND id = ?", (self.source, identifier)).fetchone():
+                raise ApiError(HTTPStatus.NOT_FOUND, "Профиль не найден.")
+            self.send_json(HTTPStatus.OK, {"reports": public_reports(connection, self.source, owner=identifier)})
             return
         public_user = PUBLIC_USER_ROUTE.fullmatch(path)
         if public_user and int(public_user[1]) <= MAX_REPORT_ID:
