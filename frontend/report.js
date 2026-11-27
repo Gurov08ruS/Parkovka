@@ -15,6 +15,11 @@ const playButton = document.querySelector("#play-camera");
 const switchButton = document.querySelector("#switch-camera");
 const cancelCameraButton = document.querySelector("#cancel-camera");
 const flashButton = document.querySelector("#camera-flash");
+const zoomControls = document.querySelector("#camera-zoom");
+const zoomRange = document.querySelector("#zoom-range");
+const zoomValue = document.querySelector("#zoom-value");
+const zoomOut = document.querySelector("#zoom-out");
+const zoomIn = document.querySelector("#zoom-in");
 const cameraViewStatus = document.querySelector("#camera-view-status");
 const saveButton = document.querySelector("#save-report");
 const closeButton = document.querySelector("#close-report");
@@ -90,6 +95,12 @@ let lastCamera = null;
 let flash = "off";
 let flashAvailable = false;
 let changingFlash = false;
+let changingZoom = false;
+let zoomTrack = null;
+let zoomCapability = null;
+let zoomBase = 1;
+let zoomDesired = 1;
+let digitalZoom = 1;
 let capturing = false;
 let locating = false;
 let locationSource = "geolocation";
@@ -173,12 +184,16 @@ function updateButtons() {
     comment.disabled = saving || saved;
     plateNumber.disabled = saving || saved;
     plateRegion.disabled = plateNumber.disabled;
-    const cameraBusy = openingCamera || capturing || changingFlash;
+    const cameraBusy = openingCamera || capturing || changingFlash || changingZoom;
     takeButton.disabled = cameraBusy || !stream || !playButton.hidden || !hasCameraFrame();
     switchButton.disabled = cameraBusy || !cameraActive || !lastCamera || saved;
     flashButton.disabled = cameraBusy || !stream;
     flashButton.hidden = !cameraActive || !flashAvailable;
     flashButton.setAttribute("aria-pressed", String(flash !== "off"));
+    zoomControls.hidden = !cameraActive;
+    zoomRange.disabled = !cameraActive || openingCamera || capturing || changingFlash;
+    zoomOut.disabled = zoomRange.disabled || zoomDesired <= 1;
+    zoomIn.disabled = zoomRange.disabled || zoomDesired >= Number(zoomRange.max);
     closeButton.disabled = saving;
     saveButton.disabled = !position || !photo || locating || openingCamera || cameraActive || saving || saved;
     saveButton.hidden = saved;
@@ -205,6 +220,12 @@ function stopCamera({ keepView = false } = {}) {
     video.srcObject = null;
     flash = "off";
     changingFlash = capturing = false;
+    changingZoom = false;
+    zoomTrack = zoomCapability = null;
+    zoomDesired = digitalZoom = zoomBase = 1;
+    zoomRange.value = "1";
+    zoomValue.textContent = "1×";
+    video.style.transform = "";
     flashAvailable = false;
     playButton.hidden = true;
     if (!keepView && cameraView.open) cameraView.close();
@@ -436,7 +457,10 @@ async function locate({ reusePosition = false } = {}) {
 
 async function getCameraStream(video) {
     let expired = false;
-    const pending = navigator.mediaDevices.getUserMedia({ video, audio: false }).then((stream) => {
+    // Prefer a sharper source for small registration marks; ideal constraints may
+    // be ignored by the device and the existing fallback still accepts any camera.
+    const requested = typeof video === "object" ? { width: { ideal: 1920 }, height: { ideal: 1080 }, ...video } : video;
+    const pending = navigator.mediaDevices.getUserMedia({ video: requested, audio: false }).then((stream) => {
         if (expired) stream.getTracks().forEach((track) => track.stop());
         return stream;
     });
@@ -523,8 +547,19 @@ async function showCamera(activeStream, current) {
     const [track] = stream.getVideoTracks();
     if (!track) throw new DOMException("", "NotFoundError");
     lastCamera = track.getSettings();
-    const torch = track.getCapabilities?.().torch;
+    const capabilities = track.getCapabilities?.() || {};
+    const torch = capabilities.torch;
     flashAvailable = torch === true || (Array.isArray(torch) && torch.includes(true) && torch.includes(false));
+    const hardwareZoom = capabilities.zoom;
+    zoomTrack = track;
+    zoomBase = Number.isFinite(lastCamera.zoom) && lastCamera.zoom > 0 ? lastCamera.zoom : 1;
+    zoomCapability = hardwareZoom && Number.isFinite(hardwareZoom.min) && Number.isFinite(hardwareZoom.max)
+        && hardwareZoom.max > zoomBase && typeof track.applyConstraints === "function" ? hardwareZoom : null;
+    zoomDesired = digitalZoom = 1;
+    zoomRange.max = String(Math.max(4, Math.min(8, zoomCapability ? zoomCapability.max / zoomBase : 1)));
+    zoomRange.value = "1";
+    zoomValue.textContent = "1×";
+    video.style.transform = "";
     track.addEventListener("ended", () => {
         if (stream === activeStream) {
             stopCamera();
@@ -675,7 +710,9 @@ async function toggleFlash() {
     changingFlash = true;
     updateButtons();
     try {
-        await track.applyConstraints({ advanced: [{ torch: next === "torch" }] });
+        const settings = { torch: next === "torch" };
+        if (Number.isFinite(track.getSettings().zoom)) settings.zoom = track.getSettings().zoom;
+        await track.applyConstraints({ advanced: [settings] });
         if (stream !== activeStream) return;
         if (next === "torch" && track.getSettings().torch === false) throw new Error("torch unavailable");
         flash = next;
@@ -695,6 +732,66 @@ async function toggleFlash() {
     }
 }
 
+async function setCameraZoom(value) {
+    if (!stream || !zoomTrack) return;
+    zoomDesired = Math.max(1, Math.min(Number(zoomRange.max), Number(value) || 1));
+    zoomRange.value = String(zoomDesired);
+    zoomValue.textContent = `${Number(zoomDesired.toFixed(1))}×`;
+    updateButtons();
+    if (changingZoom) return;
+    const activeStream = stream;
+    const track = zoomTrack;
+    changingZoom = true;
+    updateButtons();
+    let applied = 0;
+    try {
+        while (stream === activeStream && zoomTrack === track && applied !== zoomDesired) {
+            let desired = zoomDesired;
+            let hardwareFactor = 1;
+            if (zoomCapability) {
+                const { min, max, step } = zoomCapability;
+                let hardware = Math.min(max, Math.max(min, zoomBase * desired));
+                if (Number.isFinite(step) && step > 0) hardware = Math.min(max, min + Math.round((hardware - min) / step) * step);
+                const settings = { zoom: hardware };
+                if (flashAvailable) settings.torch = flash === "torch";
+                let appliedHardware = false;
+                try {
+                    await track.applyConstraints({ advanced: [settings] });
+                    appliedHardware = true;
+                } catch {
+                    // Reset the device if possible, then finish the zoom in software.
+                    zoomCapability = null;
+                    try {
+                        const reset = { zoom: zoomBase };
+                        if (flashAvailable) reset.torch = flash === "torch";
+                        await track.applyConstraints({ advanced: [reset] });
+                    } catch { /* Keep the zoom reported by the device. */ }
+                }
+                if (stream !== activeStream || zoomTrack !== track) return;
+                const actual = track.getSettings().zoom;
+                hardwareFactor = Number.isFinite(actual) && actual > 0 ? actual / zoomBase : appliedHardware ? hardware / zoomBase : 1;
+            } else {
+                const actual = track.getSettings().zoom;
+                hardwareFactor = Number.isFinite(actual) && actual > 0 ? actual / zoomBase : 1;
+            }
+            if (!zoomCapability && hardwareFactor > desired && zoomDesired === desired) {
+                desired = hardwareFactor;
+                zoomDesired = desired;
+                zoomRange.value = String(desired);
+                zoomValue.textContent = `${Number(desired.toFixed(1))}×`;
+            }
+            digitalZoom = Math.max(1, desired / Math.max(1, hardwareFactor));
+            video.style.transform = digitalZoom > 1 ? `scale(${digitalZoom})` : "";
+            applied = desired;
+        }
+    } finally {
+        if (stream === activeStream && zoomTrack === track) {
+            changingZoom = false;
+            updateButtons();
+        }
+    }
+}
+
 function takePhoto() {
     if (takeButton.disabled) return;
     if (!stream?.getVideoTracks().some((track) => track.readyState === "live")
@@ -704,11 +801,15 @@ function takePhoto() {
     }
 
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const scale = Math.max(video.clientWidth / video.videoWidth, video.clientHeight / video.videoHeight) || 1;
+    const sourceWidth = Math.min(video.videoWidth, (video.clientWidth || video.videoWidth) / scale / digitalZoom);
+    const sourceHeight = Math.min(video.videoHeight, (video.clientHeight || video.videoHeight) / scale / digitalZoom);
+    canvas.width = Math.max(1, Math.round(sourceWidth));
+    canvas.height = Math.max(1, Math.round(sourceHeight));
     let image;
     try {
-        canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.getContext("2d").drawImage(video, (video.videoWidth - sourceWidth) / 2, (video.videoHeight - sourceHeight) / 2,
+            sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
         image = canvas.toDataURL("image/png");
     } catch (error) {
         const code = cameraMessages.has(error?.name) ? error.name : "UnknownError";
@@ -782,7 +883,9 @@ async function recognizePlate(encoded, kind, currentSession) {
                 updatePlateRegion();
                 scheduleDraft();
                 cameraStatus.textContent = "Номер распознан. Проверьте его перед отправкой обращения.";
-                plateNote.textContent = "Номер распознан автоматически. Проверьте его по фотографии.";
+                plateNote.textContent = result.region
+                    ? "Номер распознан автоматически. Проверьте его по фотографии."
+                    : "Проверьте номер и введите регион с фотографии: его не удалось определить надёжно.";
             }
         } else {
             cameraStatus.textContent = "Номер найден, но прочитать его не удалось. Укажите номер вручную или переснимите фото крупнее.";
@@ -1102,6 +1205,9 @@ document.querySelector("#search-location").addEventListener("click", async () =>
 });
 cameraButton.addEventListener("click", () => openCamera("overview"));
 detailButton.addEventListener("click", () => openCamera("detail"));
+zoomRange.addEventListener("input", () => { void setCameraZoom(zoomRange.value); });
+zoomOut.addEventListener("click", () => { void setCameraZoom(Math.round((zoomDesired - .5) * 10) / 10); });
+zoomIn.addEventListener("click", () => { void setCameraZoom(Math.round((zoomDesired + .5) * 10) / 10); });
 cameraSettingsButton.addEventListener("click", async () => {
     try {
         await openCameraSettings?.();

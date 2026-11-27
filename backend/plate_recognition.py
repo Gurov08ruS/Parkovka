@@ -14,6 +14,7 @@ MODEL_DIR = Path(os.environ.get("PARKOVKA_PLATE_MODEL_DIR", "/var/lib/parkovka/m
 _lock = threading.Lock()
 _models = None
 _ppocr = None
+_backup_ocr = None
 
 
 class RecognitionUnavailable(Exception):
@@ -35,6 +36,19 @@ def models():
                                      sess_options=options, device="cpu")
         _models = detector, ocr
     return _models
+
+
+def backup_model():
+    global _backup_ocr
+    if _backup_ocr is None:
+        import onnxruntime as ort
+        from fast_plate_ocr import LicensePlateRecognizer
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = options.inter_op_num_threads = 1
+        _backup_ocr = LicensePlateRecognizer(onnx_model_path=MODEL_DIR / "cct_s_v2_global.onnx",
+                                             plate_config_path=MODEL_DIR / "cct_s_v2_global_plate_config.yaml",
+                                             sess_options=options, device="cpu")
+    return _backup_ocr
 
 
 def analyze(image_bytes, *, recognize=True):
@@ -117,9 +131,20 @@ def _analyze(image_bytes, *, recognize=True):
         if plate and region:
             candidate = (plate, region)
             break
+    # On a Russian plate sample the smaller specialist model was more accurate;
+    # use the new model as a fallback when it cannot read the whole plate.
+    if not candidate[1]:
+        backup = backup_model().run(np.asarray(tight_crop), return_confidence=True)[0]
+        backup_plate, backup_region = parse_plate(backup.plate)
+        if candidate[0] and backup_plate and backup_plate != candidate[0]:
+            return result
+        if not candidate[0] or (backup_plate == candidate[0] and backup_region):
+            candidate = (backup_plate, backup_region)
     if not candidate[1]:
         for crop in (tight_crop, padded_crop):
             plate, region = parse_plate(read_cyrillic(crop))
+            if candidate[0] and plate and plate != candidate[0]:
+                continue
             if plate and (not candidate[0] or region):
                 candidate = (plate, region)
             if candidate[0] and candidate[1]:
@@ -130,6 +155,17 @@ def _analyze(image_bytes, *, recognize=True):
 
 def parse_plate(text):
     text = re.sub(r"[^A-Z0-9А-Я]", "", text.upper()).translate(LETTER_TRANSLATION)
+    # Russian private-car plates have fixed letter and digit positions. OCR
+    # frequently confuses О and 0; correct only this visually identical pair.
+    if len(text) >= 6:
+        chars = list(text)
+        for index in (0, 4, 5):
+            if chars[index] == "0":
+                chars[index] = "О"
+        for index in (1, 2, 3, *range(6, min(len(chars), 9))):
+            if chars[index] == "О":
+                chars[index] = "0"
+        text = "".join(chars)
     match = re.match(r"([АВЕКМНОРСТУХ][0-9]{3}[АВЕКМНОРСТУХ]{2})([0-9]{2,3})?", text)
     if not match:
         return None, None

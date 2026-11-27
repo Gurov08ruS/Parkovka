@@ -163,6 +163,12 @@
 			<button type="button" class="camera-icon" id="cancel-camera" aria-label="Закрыть камеру" title="Закрыть камеру" autofocus><span aria-hidden="true">×</span></button>
 		</div>
 		<button type="button" id="play-camera" hidden>Запустить предпросмотр</button>
+		<div class="camera-zoom" id="camera-zoom" hidden>
+			<button type="button" class="camera-zoom-button" id="zoom-out" aria-label="Уменьшить масштаб">−</button>
+			<label for="zoom-range">Масштаб <output id="zoom-value" for="zoom-range">1×</output></label>
+			<input id="zoom-range" type="range" min="1" max="4" step="0.1" value="1" aria-label="Масштаб камеры">
+			<button type="button" class="camera-zoom-button" id="zoom-in" aria-label="Увеличить масштаб">+</button>
+		</div>
 		<div class="camera-actions">
 			<button type="button" class="camera-icon" id="camera-flash" aria-label="Вспышка" title="Вспышка" aria-pressed="false" hidden><span aria-hidden="true">⚡︎</span></button>
 			<button type="button" id="take-photo" aria-label="Сфотографировать" title="Сфотографировать" disabled></button>
