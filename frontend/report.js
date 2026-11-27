@@ -32,6 +32,7 @@ const plateNumber = document.querySelector("#plate-number");
 const plateRegion = document.querySelector("#plate-region");
 const plateRegionFlag = document.querySelector("#plate-region-flag");
 const plateRegionNote = document.querySelector("#plate-region-note");
+const plateNote = document.querySelector("#plate-note");
 const showSubmitted = document.querySelector("#show-submitted");
 const photoStep = document.querySelector("#photo-step");
 const reviewStep = document.querySelector("#review-step");
@@ -41,6 +42,7 @@ const reviewPhotos = document.querySelector("#review-photos");
 
 const locationPrompt = "Разрешите доступ к геолокации, чтобы определить адрес";
 const photoPrompt = "На одном или двух кадрах должны быть видны парковочный знак и госномер автомобиля";
+const platePrompt = "Проверьте распознанный номер или введите его вручную. Номер подтвердит проверяющий.";
 const latinPlateLetters = "ABEKMHOPCTYX";
 const plateLetters = "АВЕКМНОРСТУХ";
 const invalidRegionMessage = "Такого кода региона нет. Проверьте номер автомобиля.";
@@ -237,6 +239,7 @@ function resetReport() {
     comment.value = "";
     plateNumber.value = "";
     plateRegion.value = "";
+    plateNote.textContent = platePrompt;
     updatePlateRegion();
     locateButton.textContent = "Определить местоположение";
     cameraButton.textContent = "Открыть камеру";
@@ -754,6 +757,7 @@ async function recognizePlate(encoded, kind, currentSession) {
         return;
     }
     cameraStatus.textContent = "Ищем госномер на снимке…";
+    if (!plateNumber.value) plateNote.textContent = "Распознаём номер на фотографии…";
     try {
         const result = await request("/api/plates/detect", { photo: encoded });
         if (session !== currentSession || (kind === "overview" ? photo : detailPhoto) !== encoded) return;
@@ -767,22 +771,27 @@ async function recognizePlate(encoded, kind, currentSession) {
         if (generation !== recognitionGeneration) return;
         if (!result.found) {
             cameraStatus.textContent = "Госномер не найден. Переснимите фото или снимите номер крупнее на втором фото.";
+            plateNote.textContent = "Госномер на фото не найден. Проверьте снимок или введите номер вручную.";
         } else if (result.multiple) {
             cameraStatus.textContent = "Найдено несколько номеров. Снимите нужный номер крупнее на втором фото.";
+            plateNote.textContent = "На фото несколько номеров. Введите нужный вручную или снимите его крупнее.";
         } else if (result.plate) {
             if (!plateNumber.value) {
                 plateNumber.value = result.plate;
                 if (!plateRegion.value && result.region) plateRegion.value = result.region;
+                updatePlateRegion();
+                scheduleDraft();
+                cameraStatus.textContent = "Номер распознан. Проверьте его перед отправкой обращения.";
+                plateNote.textContent = "Номер распознан автоматически. Проверьте его по фотографии.";
             }
-            updatePlateRegion();
-            scheduleDraft();
-            cameraStatus.textContent = "Номер распознан. Проверьте его перед отправкой обращения.";
         } else {
             cameraStatus.textContent = "Номер найден, но прочитать его не удалось. Укажите номер вручную или переснимите фото крупнее.";
+            plateNote.textContent = "Не удалось прочитать номер. Введите его вручную или переснимите фото крупнее.";
         }
     } catch (error) {
         if (session === currentSession && generation === recognitionGeneration && (kind === "overview" ? photo : detailPhoto) === encoded) {
             cameraStatus.textContent = `Не удалось проверить номер: ${error.message}`;
+            plateNote.textContent = "Не удалось распознать номер. Проверьте подключение и введите номер вручную.";
         }
     }
 }
@@ -980,6 +989,15 @@ async function openDraft(report, user) {
         saving = false;
         updateButtons();
         if (step === 3) locatePlateRegion();
+    }
+    if (dialog.open && photo && !plateNumber.value && navigator.onLine) {
+        const draftSession = session;
+        void (async () => {
+            for (const [encoded, kind] of [[detailPhoto, "detail"], [photo, "overview"]]) {
+                if (!encoded || !dialog.open || session !== draftSession || plateNumber.value) continue;
+                await recognizePlate(encoded, kind, draftSession);
+            }
+        })();
     }
 }
 

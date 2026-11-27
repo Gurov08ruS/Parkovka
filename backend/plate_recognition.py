@@ -99,20 +99,32 @@ def _analyze(image_bytes, *, recognize=True):
     if len(rectangles) != 1 or not recognize:
         return result
     x1, y1, x2, y2 = rectangles[0]
+    tight_crop = image.crop((max(0, int(x1*width)), max(0, int(y1*height)),
+                             min(width, int(x2*width)), min(height, int(y2*height))))
     margin_x, margin_y = (x2-x1)*width*.05, (y2-y1)*height*.12
-    crop = image.crop((max(0, int(x1*width-margin_x)), max(0, int(y1*height-margin_y)),
-                       min(width, int(x2*width+margin_x)), min(height, int(y2*height+margin_y))))
-    if crop.width < 5 or crop.height < 5:
+    padded_crop = image.crop((max(0, int(x1*width-margin_x)), max(0, int(y1*height-margin_y)),
+                              min(width, int(x2*width+margin_x)), min(height, int(y2*height+margin_y))))
+    if tight_crop.width < 5 or tight_crop.height < 5:
         return result
-    prediction = ocr.run(np.asarray(crop), return_confidence=True)[0]
-    plate, region = parse_plate(prediction.plate)
-    # The specialist model is preferred when it read a complete number. The Cyrillic
-    # model provides a second opinion when it did not, including partial results.
-    if not plate or not region:
-        pp_plate, pp_region = parse_plate(read_cyrillic(crop))
-        if pp_plate and (not plate or pp_region):
-            plate, region = pp_plate, pp_region
-    result.update(plate=plate, region=region)
+    # Plate-specific OCR is sensitive to the space around the plate. Try the
+    # detector's exact crop first, then a padded crop for imperfect detections.
+    candidate = (None, None)
+    for crop in (tight_crop, padded_crop):
+        prediction = ocr.run(np.asarray(crop), return_confidence=True)[0]
+        plate, region = parse_plate(prediction.plate)
+        if plate and not candidate[0]:
+            candidate = (plate, region)
+        if plate and region:
+            candidate = (plate, region)
+            break
+    if not candidate[1]:
+        for crop in (tight_crop, padded_crop):
+            plate, region = parse_plate(read_cyrillic(crop))
+            if plate and (not candidate[0] or region):
+                candidate = (plate, region)
+            if candidate[0] and candidate[1]:
+                break
+    result.update(plate=candidate[0], region=candidate[1])
     return result
 
 
