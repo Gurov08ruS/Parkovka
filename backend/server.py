@@ -56,6 +56,7 @@ except ImportError as error:
 from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
 from plates import LOCATION_CODES, normalize_region
 from plate_recognition import RecognitionUnavailable, analyze
+from plate_boxes import cached_photo_boxes, remember_photo_boxes
 from public import leaderboard, public_account, public_photo, public_report, public_reports, set_visibility
 from report_notifications import report_notifications
 from reports import (
@@ -91,7 +92,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.12.1"
+VERSION = "0.13.0"
 PLATE_DETECT_PATH = "/api/plates/detect"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
@@ -374,7 +375,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             if kind:
                 image = public_photo(connection, self.source, identifier, kind)
                 if boxes:
-                    self.send_json(HTTPStatus.OK, {"boxes": analyze(image, recognize=False)["boxes"]})
+                    with connection:
+                        coordinates = cached_photo_boxes(connection, identifier, kind, image)
+                    self.send_json(HTTPStatus.OK, {"boxes": coordinates})
                 else:
                     content_type = "image/png" if image.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg"
                     self.send_data(HTTPStatus.OK, image, content_type)
@@ -409,8 +412,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         if boxes_route and int(boxes_route[2]) <= MAX_REPORT_ID:
             reviewer = boxes_route[1] == "review"
             account = self.account(connection, reviewer=reviewer)
-            image = report_photo(connection, int(boxes_route[2]), boxes_route[3], account, reviewer)
-            self.send_json(HTTPStatus.OK, {"boxes": analyze(image, recognize=False)["boxes"]})
+            identifier, kind = int(boxes_route[2]), boxes_route[3]
+            image = report_photo(connection, identifier, kind, account, reviewer)
+            with connection:
+                coordinates = cached_photo_boxes(connection, identifier, kind, image)
+            self.send_json(HTTPStatus.OK, {"boxes": coordinates})
             return
         route = REPORT_ROUTE.fullmatch(path)
         if route is None or int(route[2]) > MAX_REPORT_ID:
@@ -579,7 +585,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, result)
             return
         if path == PLATE_DETECT_PATH:
-            self.send_json(HTTPStatus.OK, analyze(decode_photo(data.get("photo"))))
+            image = decode_photo(data.get("photo"))
+            result = analyze(image)
+            remember_photo_boxes(image, result["boxes"])
+            self.send_json(HTTPStatus.OK, result)
             return
         if path == "/api/geocode/search":
             query = clean_text(data.get("query", ""), "Адрес", 200, required=True)
@@ -660,13 +669,20 @@ class AppHandler(SimpleHTTPRequestHandler):
             if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH):
                 if data.get("owner_max_id", account["max_id"]) != account["max_id"]:
                     raise ApiError(HTTPStatus.CONFLICT, "Войдите в аккаунт, в котором сделали снимок.")
-                if path == CAPTURE_PATH:
-                    images = [decode_photo(data.get("photo"))]
-                    if data.get("detail_photo") is not None:
-                        images.append(decode_photo(data["detail_photo"]))
-                    if not any(analyze(image, recognize=False)["found"] for image in images):
-                        raise ValueError("Госномер не найден на фотографиях. Переснимите фото так, чтобы номер был хорошо виден.")
                 report, created = save_capture(connection, data, account["id"], draft=path == DRAFT_CAPTURE_PATH)
+                captures = connection.execute("SELECT photo, detail_photo FROM report_captures WHERE report_id = ?", (report["id"],)).fetchone()
+                found = False
+                for kind, image in zip(("overview", "detail"), captures):
+                    if image is None:
+                        continue
+                    try:
+                        found |= bool(cached_photo_boxes(connection, report["id"], kind, image))
+                    except (RecognitionUnavailable, ValueError):
+                        if path == CAPTURE_PATH:
+                            raise
+                        # Offline drafts can still be stored when recognition is unavailable.
+                if path == CAPTURE_PATH and not found:
+                    raise ValueError("Госномер не найден на фотографиях. Переснимите фото так, чтобы номер был хорошо виден.")
             else:
                 report, created = create_draft(connection, data, account["id"]), True
         self.send_json(

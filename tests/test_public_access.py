@@ -146,6 +146,7 @@ class PublicAccessTest(unittest.TestCase):
             ensure_key(database)
             schema = (ROOT / 'backend/schema.sql').read_text().replace(
                 '    is_public INTEGER NOT NULL DEFAULT 0 CHECK (is_public IN (0, 1)),\n', '')
+            schema = schema.replace('    photo_boxes TEXT,\n    detail_photo_boxes TEXT,\n', '')
             with open_database(database, create=True) as conn, conn:
                 conn.executescript(schema)
                 conn.execute("INSERT INTO accounts (id, source, max_id) VALUES (1, 'test', 'legacy')")
@@ -154,6 +155,8 @@ class PublicAccessTest(unittest.TestCase):
             initialize_database(database)
             with open_database(database) as conn:
                 self.assertEqual(conn.execute('SELECT is_public FROM reports WHERE id = 1').fetchone()[0], 0)
+                columns = {row['name'] for row in conn.execute('PRAGMA table_info(report_captures)')}
+                self.assertTrue({'photo_boxes', 'detail_photo_boxes'} <= columns)
 
 
 if __name__ == '__main__':

@@ -82,6 +82,7 @@ def initialize_database(database):
                 "account_ban": "INTEGER NOT NULL DEFAULT 0 CHECK (account_ban IN (0, 1))",
                 "ban_report_id": "INTEGER REFERENCES reports(id) ON DELETE SET NULL",
             }),
+            ("report_captures", {"photo_boxes": "TEXT", "detail_photo_boxes": "TEXT"}),
         ):
             present = {column["name"] for column in connection.execute(f"PRAGMA table_info({table})")}
             for name, declaration in columns.items():
@@ -239,8 +240,10 @@ def save_capture(connection, data, owner_id, *, draft=False):
     connection.execute(
         """INSERT INTO report_captures (report_id, capture_id, address, photo, detail_photo, captured_at)
            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(report_id) DO UPDATE SET
-               address = excluded.address, photo = excluded.photo,
-               detail_photo = excluded.detail_photo, captured_at = excluded.captured_at""",
+               address = excluded.address,
+               photo_boxes = CASE WHEN report_captures.photo IS excluded.photo THEN report_captures.photo_boxes ELSE NULL END,
+               detail_photo_boxes = CASE WHEN report_captures.detail_photo IS excluded.detail_photo THEN report_captures.detail_photo_boxes ELSE NULL END,
+               photo = excluded.photo, detail_photo = excluded.detail_photo, captured_at = excluded.captured_at""",
         (identifier, capture_id, address, photo, detail, captured_at),
     )
     connection.execute("UPDATE reports SET location_source = ? WHERE id = ?", (

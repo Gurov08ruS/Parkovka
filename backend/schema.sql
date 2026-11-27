@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS report_captures (
     address TEXT,
     photo BLOB NOT NULL CHECK (length(photo) BETWEEN 4 AND 67108864),
     detail_photo BLOB CHECK (length(detail_photo) BETWEEN 4 AND 67108864),
+    photo_boxes TEXT,
+    detail_photo_boxes TEXT,
     captured_at TEXT
 );
 
