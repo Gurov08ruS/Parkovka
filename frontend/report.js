@@ -33,6 +33,7 @@ const preview = document.querySelector("#photo-preview");
 const detailPreview = document.querySelector("#detail-preview");
 const photoPreviews = document.querySelector("#photo-previews");
 const comment = document.querySelector("#report-comment");
+const publicReport = document.querySelector("#report-public");
 const plateNumber = document.querySelector("#plate-number");
 const plateRegion = document.querySelector("#plate-region");
 const plateRegionFlag = document.querySelector("#plate-region-flag");
@@ -182,6 +183,7 @@ function updateButtons() {
     detailButton.hidden = cameraActive || step !== 2;
     detailButton.disabled = cameraButton.disabled || !photo;
     comment.disabled = saving || saved;
+    publicReport.disabled = saving || saved;
     plateNumber.disabled = saving || saved;
     plateRegion.disabled = plateNumber.disabled;
     const cameraBusy = openingCamera || capturing || changingFlash || changingZoom;
@@ -258,6 +260,7 @@ function resetReport() {
     setPlateBoxes(preview);
     setPlateBoxes(detailPreview);
     comment.value = "";
+    publicReport.checked = false;
     plateNumber.value = "";
     plateRegion.value = "";
     plateNote.textContent = platePrompt;
@@ -907,6 +910,7 @@ function capturePayload(regions = null) {
         ...position, address, photo, detail_photo: detailPhoto, captured_at: capturedAt,
         location_source: locationSource,
         comment: comment.value, plate_number: plate, capture_id: captureId, owner_max_id: captureOwner,
+        is_public: publicReport.checked,
         offline_created: startedOffline,
         plate_region: /^[0-9]{2,3}$/.test(regionCode) && (!regions || regions.has(regionCode)) ? regionCode : null,
         plate_region_source: manualRegion ? "manual" : "location",
@@ -1069,6 +1073,7 @@ async function openDraft(report, user) {
             locateButton.textContent = "Определить заново";
         }
         comment.value = report.comment;
+        publicReport.checked = Boolean(report.is_public);
         const { plate, region } = splitPlate(report.plate_number || "");
         plateNumber.value = plate;
         if (report.plate_region_source === "location") locationRegion = report.plate_region || "";
@@ -1228,6 +1233,7 @@ browserCameraLink.addEventListener("click", (event) => {
 nextStep.addEventListener("click", () => showStep(step + 1));
 document.querySelector("#back-to-photos").addEventListener("click", () => showStep(1));
 comment.addEventListener("input", () => scheduleDraft(650));
+publicReport.addEventListener("change", () => scheduleDraft());
 plateNumber.addEventListener("input", () => {
     const normalize = (value) => value.toUpperCase()
         .replace(/[ABEKMHOPCTYX]/g, (letter) => plateLetters[latinPlateLetters.indexOf(letter)])

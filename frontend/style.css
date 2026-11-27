@@ -1014,3 +1014,31 @@ main {
     box-shadow: 0 0 0 1px rgba(0, 0, 0, .65), 0 0 7px rgba(36, 230, 90, .55);
     pointer-events: none;
 }
+
+.visibility-setting {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 15px;
+    border: 1px solid var(--ice);
+    border-radius: 18px;
+    background: var(--field);
+    cursor: pointer;
+}
+.visibility-setting input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--blue); }
+.visibility-setting span { display: grid; gap: 4px; }
+.visibility-setting small { color: var(--muted); line-height: 1.4; }
+.leaderboard { display: grid; gap: 10px; margin-top: 20px; }
+.leaderboard h2, .leaderboard p { margin: 0; }
+.ranking-subtitle { color: var(--muted); }
+.ranking-list { display: grid; gap: 8px; }
+.ranking-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--ice); border-radius: 18px; background: var(--field); }
+.ranking-place { text-align: center; color: var(--blue); font-size: 18px; }
+.ranking-score { min-width: 42px; padding: 7px; border-radius: 12px; color: var(--blue); background: var(--ice); text-align: center; font-weight: 700; }
+.public-user.panel-button { display: flex; align-items: center; gap: 10px; min-width: 0; text-align: left; }
+.public-user .profile-avatar { width: 40px; height: 40px; flex: none; font-size: 19px; }
+.public-user-text { display: grid; gap: 2px; min-width: 0; }
+.public-user-text small { color: var(--muted); }
+.public-user-text strong { overflow: hidden; text-overflow: ellipsis; }
+.report-filter { flex-wrap: wrap; }
+.report-filter .panel-button { flex: 1 0 auto; padding-inline: 9px; font-size: 14px; overflow-wrap: normal; white-space: nowrap; }

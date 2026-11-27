@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS reports (
     latitude REAL CHECK (latitude BETWEEN -90 AND 90),
     longitude REAL CHECK (longitude BETWEEN -180 AND 180),
     location_source TEXT,
+    is_public INTEGER NOT NULL DEFAULT 0 CHECK (is_public IN (0, 1)),
     plate_number TEXT,
     plate_source TEXT,
     plate_verification TEXT,

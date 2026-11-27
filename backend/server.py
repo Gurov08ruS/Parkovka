@@ -56,6 +56,7 @@ except ImportError as error:
 from database import DatabaseKeyError, database_has_data, migrate_plaintext, sqlite3
 from plates import LOCATION_CODES, normalize_region
 from plate_recognition import RecognitionUnavailable, analyze
+from public import leaderboard, public_account, public_photo, public_report, public_reports, set_visibility
 from report_notifications import report_notifications
 from reports import (
     MAX_PHOTO_BYTES, ApiError, account_report_stats, change_status, confirm_plate, coordinates, create_draft, decode_photo, delete_draft,
@@ -77,6 +78,9 @@ BAN_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/author-ban")
 WITHDRAW_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/withdraw")
 DELETE_DRAFT_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/delete-draft")
 PLATE_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/confirm-plate")
+VISIBILITY_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/visibility")
+PUBLIC_USER_ROUTE = re.compile(rf"/api/public/users/{REPORT_ID}")
+PUBLIC_REPORT_ROUTE = re.compile(rf"/api/public/reports/{REPORT_ID}(?:/photos/(overview|detail)(/boxes)?)?")
 CAMERA_TICKET = re.compile(r"[A-Za-z0-9_-]{43}")
 DEVICE_DIAGNOSTICS = {
     "/api/diagnostics/camera": ("camera", log_camera_error),
@@ -86,7 +90,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 PLATE_DETECT_PATH = "/api/plates/detect"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
@@ -335,6 +339,40 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST, str(error))
 
     def get_api(self, path, connection):
+        if path == "/api/public/leaderboard":
+            self.send_json(HTTPStatus.OK, {"users": leaderboard(connection, self.source)})
+            return
+        public_user = PUBLIC_USER_ROUTE.fullmatch(path)
+        if public_user and int(public_user[1]) <= MAX_REPORT_ID:
+            user = public_account(connection, self.source, int(public_user[1]))
+            max_id = user.pop("max_id")
+            source = user.pop("source")
+            profile = self.server.max_profiles.get(max_id) if source == "max" else None
+            if profile is None and source == "max" and self.max_bot:
+                profile = self.max_bot.author_profile(max_id)
+                if profile:
+                    self.server.max_profiles.put(max_id, int(time.time()) + 300, profile)
+            first, last, photo, link = profile or ("", "", None, None)
+            user.update(first_name=first, last_name=last, photo_url=photo, profile_url=link)
+            self.send_json(HTTPStatus.OK, user)
+            return
+        if path == "/api/public/reports":
+            current = session_account(connection, session_token_hash(self.request_session_token()), self.source)
+            self.send_json(HTTPStatus.OK, {"reports": public_reports(connection, self.source, current["id"] if current else None)})
+            return
+        public_route = PUBLIC_REPORT_ROUTE.fullmatch(path)
+        if public_route and int(public_route[1]) <= MAX_REPORT_ID:
+            identifier, kind, boxes = int(public_route[1]), public_route[2], public_route[3]
+            if kind:
+                image = public_photo(connection, self.source, identifier, kind)
+                if boxes:
+                    self.send_json(HTTPStatus.OK, {"boxes": analyze(image, recognize=False)["boxes"]})
+                else:
+                    content_type = "image/png" if image.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg"
+                    self.send_data(HTTPStatus.OK, image, content_type)
+            else:
+                self.send_json(HTTPStatus.OK, public_report(connection, self.source, identifier))
+            return
         if path == "/api/session":
             self.send_json(HTTPStatus.OK, self.session_data(self.account(connection, required=False)))
             return
@@ -395,11 +433,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         withdraw_route = WITHDRAW_ROUTE.fullmatch(path)
         delete_draft_route = DELETE_DRAFT_ROUTE.fullmatch(path)
         plate_route = PLATE_ROUTE.fullmatch(path)
+        visibility_route = VISIBILITY_ROUTE.fullmatch(path)
         diagnostic = DEVICE_DIAGNOSTICS.get(path)
         if path not in {
             "/api/session", "/api/session/camera", "/api/camera/handoff", "/api/logout", "/api/profile", "/api/reviewer", "/api/geocode", WEBHOOK_PATH,
             REPORTS_PATH, CAPTURE_PATH, DRAFT_CAPTURE_PATH, PLATE_DETECT_PATH, "/api/achievements/rules", "/api/geocode/search",
-        } and not (status_route or ban_route or withdraw_route or delete_draft_route or plate_route or diagnostic):
+        } and not (status_route or ban_route or withdraw_route or delete_draft_route or plate_route or visibility_route or diagnostic):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
@@ -414,7 +453,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             limit = MAX_CAPTURE_BODY_BYTES if path in (CAPTURE_PATH, DRAFT_CAPTURE_PATH, PLATE_DETECT_PATH) else MAX_BODY_BYTES
             data = self.read_json(limit)
             with closing(open_database(self.database)) as connection:
-                self.post_api(path, status_route, ban_route, withdraw_route, delete_draft_route, plate_route, data, connection)
+                self.post_api(path, status_route, ban_route, withdraw_route, delete_draft_route, plate_route, visibility_route, data, connection)
         except ApiError as error:
             self.send_error(error.status, str(error))
         except AccountBanned as error:
@@ -439,7 +478,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.max_bot.handle_update(self.read_json(MAX_WEBHOOK_BODY_BYTES))
         self.send_json(HTTPStatus.OK, {"ok": True})
 
-    def post_api(self, path, status_route, ban_route, withdraw_route, delete_draft_route, plate_route, data, connection):
+    def post_api(self, path, status_route, ban_route, withdraw_route, delete_draft_route, plate_route, visibility_route, data, connection):
         old_token = self.request_session_token()
         token_hash = session_token_hash(old_token)
         if path == "/api/session/camera":
@@ -523,6 +562,14 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None or plate_route is not None)
+        if visibility_route:
+            identifier = int(visibility_route[1])
+            if identifier > MAX_REPORT_ID:
+                raise ApiError(HTTPStatus.NOT_FOUND, "Обращение не найдено.")
+            with connection:
+                result = set_visibility(connection, identifier, account["id"], data.get("is_public"))
+            self.send_json(HTTPStatus.OK, result)
+            return
         if path == PLATE_DETECT_PATH:
             self.send_json(HTTPStatus.OK, analyze(decode_photo(data.get("photo"))))
             return

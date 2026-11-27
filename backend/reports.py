@@ -22,7 +22,7 @@ TRANSITIONS = {
 }
 REPORT_QUERY = """
     SELECT reports.id, CASE WHEN withdrawn_at IS NOT NULL THEN 'withdrawn' ELSE reports.status END AS status,
-           latitude, longitude, location_source, plate_number, plate_source, plate_verification, plate_region, plate_region_source,
+           latitude, longitude, location_source, is_public, plate_number, plate_source, plate_verification, plate_region, plate_region_source,
            comment, created_at, submitted_at, withdrawn_at,
            address, captured_at, captures.report_id IS NOT NULL AS has_photo,
            detail_photo IS NOT NULL AS has_detail_photo,
@@ -76,6 +76,7 @@ def initialize_database(database):
                 "plate_region": "TEXT", "plate_region_source": "TEXT",
                 "deleted_at": "TEXT", "deleted_capture_id": "TEXT",
                 "location_source": "TEXT",
+                "is_public": "INTEGER NOT NULL DEFAULT 0 CHECK (is_public IN (0, 1))",
             }),
             ("report_events", {
                 "account_ban": "INTEGER NOT NULL DEFAULT 0 CHECK (account_ban IN (0, 1))",
@@ -141,6 +142,7 @@ def report_json(row):
     report["has_photo"] = bool(report["has_photo"])
     report["has_detail_photo"] = bool(report["has_detail_photo"])
     report["auto_rejected"] = bool(report["auto_rejected"])
+    report["is_public"] = bool(report["is_public"])
     return report
 
 
@@ -188,6 +190,9 @@ def create_draft(connection, data, owner_id):
 
 def save_capture(connection, data, owner_id, *, draft=False):
     fields = report_fields(data, draft=draft)
+    visibility = data.get("is_public")
+    if visibility is not None and type(visibility) is not bool:
+        raise ValueError("Некорректная настройка публичности обращения.")
     capture_id = data.get("capture_id")
     if not isinstance(capture_id, str) or not CAPTURE_ID.fullmatch(capture_id):
         raise ValueError("Некорректный идентификатор отправки.")
@@ -241,6 +246,8 @@ def save_capture(connection, data, owner_id, *, draft=False):
     connection.execute("UPDATE reports SET location_source = ? WHERE id = ?", (
         "manual" if data.get("location_source") == "manual" else "geolocation", identifier,
     ))
+    if visibility is not None:
+        connection.execute("UPDATE reports SET is_public = ? WHERE id = ?", (int(visibility), identifier))
     if previous is None and data.get("offline_created") is True:
         award(connection, owner_id, "offline_sync")
     if detail is not None:
