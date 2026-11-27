@@ -57,6 +57,7 @@ from database import DatabaseKeyError, database_has_data, migrate_plaintext, sql
 from plates import LOCATION_CODES, normalize_region
 from plate_recognition import RecognitionUnavailable, analyze
 from plate_boxes import cached_photo_boxes, remember_photo_boxes
+from profile_cache import cached_profile, needs_avatar, save_profile, schedule_avatar, schedule_live_profile
 from public import leaderboard, public_account, public_photo, public_report, public_reports, set_visibility
 from report_notifications import report_notifications
 from reports import (
@@ -81,6 +82,7 @@ DELETE_DRAFT_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/delete-draft")
 PLATE_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/confirm-plate")
 VISIBILITY_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/visibility")
 PUBLIC_USER_ROUTE = re.compile(rf"/api/public/users/{REPORT_ID}")
+PUBLIC_AVATAR_ROUTE = re.compile(rf"/api/public/users/{REPORT_ID}/avatar")
 PUBLIC_USER_REPORTS_ROUTE = re.compile(rf"/api/public/users/{REPORT_ID}/reports")
 PUBLIC_REPORT_ROUTE = re.compile(rf"/api/public/reports/{REPORT_ID}(?:/photos/(overview|detail)(/boxes)?)?")
 CAMERA_TICKET = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -92,7 +94,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.13.0"
+VERSION = "0.14.0"
 PLATE_DETECT_PATH = "/api/plates/detect"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
@@ -251,16 +253,23 @@ class AppHandler(SimpleHTTPRequestHandler):
     def request_session_token(self):
         return cookie_token(self.headers.get("Cookie"), self.source)
 
-    def session_data(self, account, token_hash=None):
+    def max_profile(self, connection, account_id, max_id, *, prefer_live=False):
+        saved = cached_profile(connection, account_id)
+        profile = self.server.max_profiles.get(max_id)
+        if self.max_bot and (prefer_live or profile is None):
+            live = self.max_bot.author_profile(max_id)
+            if live:
+                profile = live
+                self.server.max_profiles.put(max_id, time.time() + 300, live)
+        first, last, photo, link = profile or ("", "", None, None)
+        avatar = f"/api/public/users/{account_id}/avatar" if saved.get("has_avatar") else photo or saved.get("photo_url")
+        return first or saved.get("first_name") or "", last or saved.get("last_name") or "", avatar, link or saved.get("profile_url")
+
+    def session_data(self, account, token_hash=None, *, connection=None):
         user = None
         if account is not None:
             if self.source == "max":
-                profile = self.server.max_profiles.get(account["max_id"])
-                if profile is None and self.max_bot:
-                    profile = self.max_bot.author_profile(account["max_id"])
-                    if profile:
-                        self.server.max_profiles.put(account["max_id"], account["expires_at"], profile)
-                first_name, last_name, photo_url, _ = profile or ("", "", None, None)
+                first_name, last_name, photo_url, _ = self.max_profile(connection, account["id"], account["max_id"])
             else:
                 token_hash = token_hash or session_token_hash(self.request_session_token())
                 profile = self.server.session_profiles.get(token_hash)
@@ -351,17 +360,20 @@ class AppHandler(SimpleHTTPRequestHandler):
                 raise ApiError(HTTPStatus.NOT_FOUND, "Профиль не найден.")
             self.send_json(HTTPStatus.OK, {"reports": public_reports(connection, self.source, owner=identifier)})
             return
+        public_avatar = PUBLIC_AVATAR_ROUTE.fullmatch(path)
+        if public_avatar and int(public_avatar[1]) <= MAX_REPORT_ID:
+            row = connection.execute("""SELECT avatar_png FROM max_profile_cache JOIN accounts ON accounts.id = account_id
+                WHERE accounts.id = ? AND accounts.source = ?""", (int(public_avatar[1]), self.source)).fetchone()
+            if not row or row[0] is None:
+                raise ApiError(HTTPStatus.NOT_FOUND, "Аватар не найден.")
+            self.send_data(HTTPStatus.OK, row[0], "image/png")
+            return
         public_user = PUBLIC_USER_ROUTE.fullmatch(path)
         if public_user and int(public_user[1]) <= MAX_REPORT_ID:
             user = public_account(connection, self.source, int(public_user[1]))
             max_id = user.pop("max_id")
             source = user.pop("source")
-            profile = self.server.max_profiles.get(max_id) if source == "max" else None
-            if profile is None and source == "max" and self.max_bot:
-                profile = self.max_bot.author_profile(max_id)
-                if profile:
-                    self.server.max_profiles.put(max_id, int(time.time()) + 300, profile)
-            first, last, photo, link = profile or ("", "", None, None)
+            first, last, photo, link = self.max_profile(connection, user["id"], max_id) if source == "max" else ("", "", None, None)
             user.update(first_name=first, last_name=last, photo_url=photo, profile_url=link)
             self.send_json(HTTPStatus.OK, user)
             return
@@ -385,7 +397,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, public_report(connection, self.source, identifier))
             return
         if path == "/api/session":
-            self.send_json(HTTPStatus.OK, self.session_data(self.account(connection, required=False)))
+            self.send_json(HTTPStatus.OK, self.session_data(self.account(connection, required=False), connection=connection))
             return
         if path == "/api/achievements":
             account = self.account(connection)
@@ -433,11 +445,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             if reviewer and report["author"]["source"] == "max":
                 author = report["author"]
                 max_id = author["max_id"]
-                live_profile = self.max_bot.author_profile(max_id) if self.max_bot else None
-                profile = live_profile or self.server.max_profiles.get(max_id)
-                if profile:
-                    first_name, last_name, photo_url, profile_url = profile
-                    author.update(first_name=first_name, last_name=last_name, photo_url=photo_url, profile_url=profile_url)
+                first_name, last_name, photo_url, profile_url = self.max_profile(connection, author["id"], max_id, prefer_live=True)
+                author.update(first_name=first_name, last_name=last_name, photo_url=photo_url, profile_url=profile_url)
             self.send_json(HTTPStatus.OK, report)
 
     def do_POST(self):
@@ -507,7 +516,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     raise ApiError(HTTPStatus.UNAUTHORIZED, "Ссылка на камеру истекла или уже использована. Откройте её заново в MAX.")
                 token, account = create_session(connection, "max", original["max_id"], None)
             max_age = max(0, account["expires_at"] - int(time.time()))
-            self.send_json(HTTPStatus.OK, self.session_data(account), self.session_cookie(token, max_age))
+            self.send_json(HTTPStatus.OK, self.session_data(account, connection=connection), self.session_cookie(token, max_age))
             return
         if path == "/api/session":
             profile = None
@@ -522,6 +531,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                     raise ApiError(HTTPStatus.UNAUTHORIZED, str(error)) from error
             with connection:
                 token, account = create_session(connection, self.source, max_id, token_hash)
+                if profile:
+                    save_profile(connection, account["id"], profile)
             profiles = self.server.session_profiles
             if token is not None:
                 profiles.remove(token_hash)
@@ -532,9 +543,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                 headers = (self.session_cookie(token or old_token, max_age),)
             if profile:
                 self.server.max_profiles.put(max_id, account["expires_at"], profile)
+                saved = cached_profile(connection, account["id"])
                 if self.max_bot:
                     self.max_bot.remember_dialog(max_id, chat_id)
-            self.send_json(HTTPStatus.OK, self.session_data(account, token_hash), *headers)
+                    if chat_id is not None:
+                        schedule_live_profile(self.database, account["id"], max_id, self.max_bot, profile, saved["revision"])
+                if needs_avatar(saved):
+                    schedule_avatar(self.database, account["id"], saved["photo_url"])
+            self.send_json(HTTPStatus.OK, self.session_data(account, token_hash, connection=connection), *headers)
             return
 
         if path == "/api/logout":
@@ -544,7 +560,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             headers = [self.session_cookie("", 0)]
             if self.source == "max":
                 headers.append(self.session_cookie("", 0, legacy=True))
-            self.send_json(HTTPStatus.OK, self.session_data(None), *headers)
+            self.send_json(HTTPStatus.OK, self.session_data(None, connection=connection), *headers)
             return
 
         if path == "/api/reviewer":
@@ -572,7 +588,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 connection.execute("UPDATE sessions SET review_grant = ? WHERE token_hash = ?", (self.review_grant, token_hash))
                 account = session_account(connection, token_hash, self.source)
             headers = (self.session_cookie(token, max(0, account["expires_at"] - int(time.time()))),) if token else ()
-            self.send_json(HTTPStatus.OK, self.session_data(account, token_hash), *headers)
+            self.send_json(HTTPStatus.OK, self.session_data(account, token_hash, connection=connection), *headers)
             return
 
         account = self.account(connection, reviewer=status_route is not None or ban_route is not None or plate_route is not None)
@@ -635,7 +651,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 data.get("first_name"), data.get("last_name"), last_required=True,
             )
             self.server.session_profiles.put(token_hash, account["expires_at"], (first_name, last_name, None))
-            self.send_json(HTTPStatus.OK, self.session_data(account))
+            self.send_json(HTTPStatus.OK, self.session_data(account, connection=connection))
             return
 
         if path == "/api/geocode":

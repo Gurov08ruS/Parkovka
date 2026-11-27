@@ -5,6 +5,19 @@ CREATE TABLE IF NOT EXISTS accounts (
     UNIQUE (source, max_id)
 );
 
+CREATE TABLE IF NOT EXISTS max_profile_cache (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    first_name TEXT,
+    last_name TEXT,
+    photo_url TEXT,
+    profile_url TEXT,
+    avatar_png BLOB,
+    avatar_source_url TEXT,
+    avatar_updated_at INTEGER,
+    revision INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS account_bans (
     account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
     reviewer_id INTEGER NOT NULL REFERENCES accounts(id),

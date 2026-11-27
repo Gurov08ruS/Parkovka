@@ -350,12 +350,17 @@ const publicUserCache = new Map();
 function loadPublicUser(identifier) {
     const cached = publicUserCache.get(identifier);
     if (cached && cached.expires > Date.now()) return cached.promise;
-    const promise = request(`/api/public/users/${identifier}`).catch((error) => {
-        publicUserCache.delete(identifier);
+    const entry = { expires: Date.now() + 10000, promise: null };
+    entry.promise = request(`/api/public/users/${identifier}`).then((user) => {
+        // Missing MAX data may appear as soon as the user signs in again.
+        entry.expires = Date.now() + (user.first_name && user.photo_url ? 60000 : 5000);
+        return user;
+    }).catch((error) => {
+        if (publicUserCache.get(identifier) === entry) publicUserCache.delete(identifier);
         throw error;
     });
-    publicUserCache.set(identifier, { promise, expires: Date.now() + 300000 });
-    return promise;
+    publicUserCache.set(identifier, entry);
+    return entry.promise;
 }
 
 function publicName(user) {

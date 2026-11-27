@@ -83,6 +83,8 @@ def initialize_database(database):
                 "ban_report_id": "INTEGER REFERENCES reports(id) ON DELETE SET NULL",
             }),
             ("report_captures", {"photo_boxes": "TEXT", "detail_photo_boxes": "TEXT"}),
+            ("max_profile_cache", {"avatar_source_url": "TEXT", "avatar_updated_at": "INTEGER",
+                                   "revision": "INTEGER NOT NULL DEFAULT 0"}),
         ):
             present = {column["name"] for column in connection.execute(f"PRAGMA table_info({table})")}
             for name, declaration in columns.items():
