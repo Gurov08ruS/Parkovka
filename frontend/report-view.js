@@ -1,4 +1,5 @@
 import { element } from "./ui.js";
+import { loadPlateBoxes } from "./plate-overlay.js";
 
 const banNotice = "Автоматически отклонено из-за блокировки аккаунта";
 export const REPORT_ID = /^(?:0|[1-9][0-9]{0,18})$/;
@@ -100,6 +101,7 @@ export function reportCard(report, path, control, banLink) {
             image.src = `${path}/photos/${kind}`;
             image.alt = alt;
             gallery.append(image);
+            void loadPlateBoxes(image, image.src);
         }
         card.append(gallery);
     }
@@ -132,6 +134,7 @@ export function appendReportDetails(container, report, path, banLink) {
         const figure = element("figure");
         figure.append(image, element("figcaption", label));
         gallery.append(figure);
+        void loadPlateBoxes(image, image.src);
     }
     if (gallery.children.length) container.append(gallery);
     if (report.events.length) {

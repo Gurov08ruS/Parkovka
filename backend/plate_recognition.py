@@ -1,5 +1,6 @@
 """CPU-only plate detection and OCR. Images are never sent to external services."""
 import io
+import math
 import logging
 import os
 import re
@@ -12,6 +13,7 @@ LOG = logging.getLogger(__name__)
 MODEL_DIR = Path(os.environ.get("PARKOVKA_PLATE_MODEL_DIR", "/var/lib/parkovka/models"))
 _lock = threading.Lock()
 _models = None
+_ppocr = None
 
 
 class RecognitionUnavailable(Exception):
@@ -35,12 +37,12 @@ def models():
     return _models
 
 
-def analyze(image_bytes):
+def analyze(image_bytes, *, recognize=True):
     # Bound inference concurrency on small servers; report temporary overload instead of queueing images indefinitely.
     if not _lock.acquire(timeout=20):
         raise RecognitionUnavailable("Распознавание занято. Повторите попытку через несколько секунд.")
     try:
-        return _analyze(image_bytes)
+        return _analyze(image_bytes, recognize=recognize)
     except (ValueError, RecognitionUnavailable):
         raise
     except Exception:
@@ -50,7 +52,7 @@ def analyze(image_bytes):
         _lock.release()
 
 
-def _analyze(image_bytes):
+def _analyze(image_bytes, *, recognize=True):
     import numpy as np
     from PIL import Image, ImageOps, UnidentifiedImageError
     try:
@@ -84,20 +86,66 @@ def _analyze(image_bytes):
         boxes.append((x1, y1, x2, y2, area))
         if len(boxes) >= 5:
             break
-    if not boxes:
-        return {"found": False, "multiple": False, "plate": None, "region": None}
-    result = {"found": True, "multiple": len(boxes) > 1, "plate": None, "region": None}
-    if len(boxes) != 1:
+    # Coordinates are normalized to the displayed, orientation-corrected photo.
+    rectangles = []
+    for x1, y1, x2, y2, _ in boxes:
+        x1, x2 = max(0, (x1-left)/scale), min(width, (x2-left)/scale)
+        y1, y2 = max(0, (y1-top)/scale), min(height, (y2-top)/scale)
+        if x2 > x1 and y2 > y1:
+            rectangles.append([round(float(x1/width), 6), round(float(y1/height), 6),
+                               round(float(x2/width), 6), round(float(y2/height), 6)])
+    result = {"found": bool(rectangles), "multiple": len(rectangles) > 1,
+              "plate": None, "region": None, "boxes": rectangles}
+    if len(rectangles) != 1 or not recognize:
         return result
-    x1, y1, x2, y2, _ = boxes[0]
-    margin_x, margin_y = (x2-x1)*.05, (y2-y1)*.12
-    crop = image.crop((max(0, int((x1-left-margin_x)/scale)), max(0, int((y1-top-margin_y)/scale)),
-                       min(width, int((x2-left+margin_x)/scale)), min(height, int((y2-top+margin_y)/scale))))
+    x1, y1, x2, y2 = rectangles[0]
+    margin_x, margin_y = (x2-x1)*width*.05, (y2-y1)*height*.12
+    crop = image.crop((max(0, int(x1*width-margin_x)), max(0, int(y1*height-margin_y)),
+                       min(width, int(x2*width+margin_x)), min(height, int(y2*height+margin_y))))
     if crop.width < 5 or crop.height < 5:
         return result
     prediction = ocr.run(np.asarray(crop), return_confidence=True)[0]
-    text = re.sub(r"[^A-Z0-9А-Я]", "", prediction.plate.upper()).translate(LETTER_TRANSLATION)
-    match = re.fullmatch(r"([АВЕКМНОРСТУХ][0-9]{3}[АВЕКМНОРСТУХ]{2})([0-9]{2,3})", text)
-    if match and match[2] in REGISTRATION_CODES:
-        result.update(plate=match[1], region=match[2])
+    plate, region = parse_plate(prediction.plate)
+    # The specialist model is preferred when it read a complete number. The Cyrillic
+    # model provides a second opinion when it did not, including partial results.
+    if not plate or not region:
+        pp_plate, pp_region = parse_plate(read_cyrillic(crop))
+        if pp_plate and (not plate or pp_region):
+            plate, region = pp_plate, pp_region
+    result.update(plate=plate, region=region)
     return result
+
+
+def parse_plate(text):
+    text = re.sub(r"[^A-Z0-9А-Я]", "", text.upper()).translate(LETTER_TRANSLATION)
+    match = re.match(r"([АВЕКМНОРСТУХ][0-9]{3}[АВЕКМНОРСТУХ]{2})([0-9]{2,3})?", text)
+    if not match:
+        return None, None
+    region = match[2] if match[2] in REGISTRATION_CODES else None
+    return match[1], region
+
+
+def read_cyrillic(crop):
+    global _ppocr
+    import cv2
+    import numpy as np
+    import onnxruntime as ort
+    if _ppocr is None:
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = options.inter_op_num_threads = 1
+        options.log_severity_level = 3
+        session = ort.InferenceSession(str(MODEL_DIR / "ppocr6_cyrillic.onnx"), sess_options=options,
+                                       providers=["CPUExecutionProvider"])
+        characters = [""] + session.get_modelmeta().custom_metadata_map["character"].splitlines() + [" "]
+        _ppocr = session, characters
+    session, characters = _ppocr
+    image = np.asarray(crop)[:, :, ::-1]  # PaddleOCR uses BGR.
+    height, width = image.shape[:2]
+    resized_width = min(640, max(1, math.ceil(48 * width / height)))
+    resized = cv2.resize(image, (resized_width, 48)).astype(np.float32) / 127.5 - 1.0
+    tensor = np.zeros((48, 640, 3), dtype=np.float32)
+    tensor[:, :resized_width] = resized
+    scores = session.run(None, {session.get_inputs()[0].name: tensor.transpose(2, 0, 1)[None]})[0][0]
+    indices = scores.argmax(axis=1)
+    return "".join(characters[index] for i, index in enumerate(indices)
+                   if index and (not i or index != indices[i - 1]))

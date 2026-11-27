@@ -1,6 +1,7 @@
 import { registerDraftEditor, registerOfflineDraftSync, requestMaxCameraAccess, maxCameraSettings, requireAccount, showHistory } from "./app.js";
 import { request, initData, loadSession, withTimeout } from "./ui.js";
 import { saveOfflineDraft, removeOfflineDraft, uploadOfflineDrafts } from "./offline-drafts.js";
+import { loadPlateBoxes, setPlateBoxes } from "./plate-overlay.js";
 
 const dialog = document.querySelector("#report-dialog");
 const form = document.querySelector("#report-form");
@@ -98,6 +99,8 @@ let saving = false;
 let openCameraSettings;
 let browserCameraGeneration = 0;
 let recognitionGeneration = 0;
+let overviewBoxes = [];
+let detailBoxes = [];
 
 function maxPlatform() {
     return window.WebApp?.platform || new URLSearchParams(location.hash.slice(1)).get("WebAppPlatform") || "unknown";
@@ -227,6 +230,10 @@ function resetReport() {
     stopCamera();
     preview.removeAttribute("src");
     detailPreview.removeAttribute("src");
+    overviewBoxes = [];
+    detailBoxes = [];
+    setPlateBoxes(preview);
+    setPlateBoxes(detailPreview);
     comment.value = "";
     plateNumber.value = "";
     plateRegion.value = "";
@@ -257,12 +264,13 @@ function showStep(value) {
         : "На снимке должен быть чётко виден номер этого же автомобиля";
     nextStep.textContent = step === 1 ? "К следующему фото" : "Перейти к проверке";
     reviewPhotos.replaceChildren();
-    for (const [source, label] of [[photo && preview.src, "Фото автомобиля"], [detailPhoto && detailPreview.src, "Фото номера"]]) {
+    for (const [source, label, boxes] of [[photo && preview.src, "Фото автомобиля", overviewBoxes], [detailPhoto && detailPreview.src, "Фото номера", detailBoxes]]) {
         if (!source) continue;
         const image = document.createElement("img");
         image.src = source;
         image.alt = label;
         reviewPhotos.append(image);
+        setPlateBoxes(image, boxes);
     }
     updateButtons();
     dialog.scrollTop = 0;
@@ -719,11 +727,15 @@ function takePhoto() {
     }
     if (photoKind === "overview") {
         photo = encoded;
+        overviewBoxes = [];
+        setPlateBoxes(preview);
         capturedAt = new Date().toISOString();
         preview.src = image;
         cameraButton.textContent = "Переснять основное фото";
     } else {
         detailPhoto = encoded;
+        detailBoxes = [];
+        setPlateBoxes(detailPreview);
         detailPreview.src = image;
         detailButton.textContent = "Переснять второе фото";
     }
@@ -744,7 +756,15 @@ async function recognizePlate(encoded, kind, currentSession) {
     cameraStatus.textContent = "Ищем госномер на снимке…";
     try {
         const result = await request("/api/plates/detect", { photo: encoded });
-        if (session !== currentSession || generation !== recognitionGeneration || (kind === "overview" ? photo : detailPhoto) !== encoded) return;
+        if (session !== currentSession || (kind === "overview" ? photo : detailPhoto) !== encoded) return;
+        if (kind === "overview") overviewBoxes = result.boxes || [];
+        else detailBoxes = result.boxes || [];
+        setPlateBoxes(kind === "overview" ? preview : detailPreview, result.boxes || []);
+        if (step === 3) {
+            const reviewImage = reviewPhotos.querySelectorAll("img")[kind === "overview" ? 0 : 1];
+            if (reviewImage) setPlateBoxes(reviewImage, result.boxes || []);
+        }
+        if (generation !== recognitionGeneration) return;
         if (!result.found) {
             cameraStatus.textContent = "Госномер не найден. Переснимите фото или снимите номер крупнее на втором фото.";
         } else if (result.multiple) {
@@ -752,7 +772,7 @@ async function recognizePlate(encoded, kind, currentSession) {
         } else if (result.plate) {
             if (!plateNumber.value) {
                 plateNumber.value = result.plate;
-                if (!plateRegion.value) plateRegion.value = result.region;
+                if (!plateRegion.value && result.region) plateRegion.value = result.region;
             }
             updatePlateRegion();
             scheduleDraft();
@@ -942,6 +962,17 @@ async function openDraft(report, user) {
         if (report.plate_region_source === "location") locationRegion = report.plate_region || "";
         else plateRegion.value = report.plate_region || region;
         showStep(3);
+        const draftSession = session;
+        for (const [index, kind, image, encoded] of [[0, "overview", preview, photo], [1, "detail", detailPreview, detailPhoto]]) {
+            if (!encoded) continue;
+            void loadPlateBoxes(image, `/api/reports/${report.id}/photos/${kind}`).then((boxes) => {
+                if (!boxes || session !== draftSession || (kind === "overview" ? photo : detailPhoto) !== encoded) return;
+                if (kind === "overview") overviewBoxes = boxes;
+                else detailBoxes = boxes;
+                const reviewImage = reviewPhotos.querySelectorAll("img")[index];
+                if (reviewImage) setPlateBoxes(reviewImage, boxes);
+            });
+        }
         draftStatus.textContent = "Черновик сохранён";
     } catch (error) {
         draftStatus.textContent = error.message;

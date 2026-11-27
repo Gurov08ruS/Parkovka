@@ -71,6 +71,7 @@ DRAFT_CAPTURE_PATH = f"{CAPTURE_PATH}/draft"
 REVIEW_PATH = "/api/review"
 REPORT_ID = r"(0|[1-9][0-9]{0,18})"
 REPORT_ROUTE = re.compile(rf"/api/(reports|review)/{REPORT_ID}(?:/photos/(overview|detail))?")
+PHOTO_BOX_ROUTE = re.compile(rf"/api/(reports|review)/{REPORT_ID}/photos/(overview|detail)/boxes")
 STATUS_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/status")
 BAN_ROUTE = re.compile(rf"/api/review/{REPORT_ID}/author-ban")
 WITHDRAW_ROUTE = re.compile(rf"/api/reports/{REPORT_ID}/withdraw")
@@ -85,7 +86,7 @@ MAX_BODY_BYTES = 16 * 1024
 MAX_WEBHOOK_BODY_BYTES = 128 * 1024
 MAX_CAPTURE_BODY_BYTES = 2 * ((MAX_PHOTO_BYTES + 2) // 3) * 4 + MAX_BODY_BYTES
 MAX_REPORT_ID = 2**63 - 1
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 PLATE_DETECT_PATH = "/api/plates/detect"
 PHOTON_URL = os.environ.get("PARKOVKA_PHOTON_URL", "https://photon.komoot.io").rstrip("/")
 DEFAULT_DATABASE = Path(__file__).parent / "data" / "parkovka.encrypted.sqlite3"
@@ -328,6 +329,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.FORBIDDEN, str(error))
         except (DatabaseKeyError, sqlite3.Error):
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "База данных недоступна.")
+        except RecognitionUnavailable as error:
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(error))
+        except ValueError as error:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(error))
 
     def get_api(self, path, connection):
         if path == "/api/session":
@@ -353,6 +358,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             reviewer = path == REVIEW_PATH
             account = self.account(connection, reviewer=reviewer)
             self.send_json(HTTPStatus.OK, {"reports": list_reports(connection, account, reviewer)})
+            return
+        boxes_route = PHOTO_BOX_ROUTE.fullmatch(path)
+        if boxes_route and int(boxes_route[2]) <= MAX_REPORT_ID:
+            reviewer = boxes_route[1] == "review"
+            account = self.account(connection, reviewer=reviewer)
+            image = report_photo(connection, int(boxes_route[2]), boxes_route[3], account, reviewer)
+            self.send_json(HTTPStatus.OK, {"boxes": analyze(image, recognize=False)["boxes"]})
             return
         route = REPORT_ROUTE.fullmatch(path)
         if route is None or int(route[2]) > MAX_REPORT_ID:
@@ -597,7 +609,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     images = [decode_photo(data.get("photo"))]
                     if data.get("detail_photo") is not None:
                         images.append(decode_photo(data["detail_photo"]))
-                    if not any(analyze(image)["found"] for image in images):
+                    if not any(analyze(image, recognize=False)["found"] for image in images):
                         raise ValueError("Госномер не найден на фотографиях. Переснимите фото так, чтобы номер был хорошо виден.")
                 report, created = save_capture(connection, data, account["id"], draft=path == DRAFT_CAPTURE_PATH)
             else:
