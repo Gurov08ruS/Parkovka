@@ -352,7 +352,6 @@ function loadPublicUser(identifier) {
     if (cached && cached.expires > Date.now()) return cached.promise;
     const entry = { expires: Date.now() + 10000, promise: null };
     entry.promise = request(`/api/public/users/${identifier}`).then((user) => {
-        // Missing MAX data may appear as soon as the user signs in again.
         entry.expires = Date.now() + (user.first_name && user.photo_url ? 60000 : 5000);
         return user;
     }).catch((error) => {

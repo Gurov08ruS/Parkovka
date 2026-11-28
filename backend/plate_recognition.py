@@ -1,4 +1,3 @@
-"""CPU-only plate detection and OCR. Images are never sent to external services."""
 import io
 import math
 import logging
@@ -13,7 +12,7 @@ LOG = logging.getLogger(__name__)
 MODEL_DIR = Path(os.environ.get("PARKOVKA_PLATE_MODEL_DIR", "/var/lib/parkovka/models"))
 _lock = threading.Lock()
 _models = None
-_ppocr = None
+_cyrillic_reader = None
 _backup_ocr = None
 
 
@@ -29,10 +28,10 @@ def models():
         options = ort.SessionOptions()
         options.intra_op_num_threads = 1
         options.inter_op_num_threads = 1
-        detector = ort.InferenceSession(str(MODEL_DIR / "alpr_26n.onnx"), sess_options=options,
+        detector = ort.InferenceSession(str(MODEL_DIR / "поиск_номера.onnx"), sess_options=options,
                                         providers=["CPUExecutionProvider"])
-        ocr = LicensePlateRecognizer(onnx_model_path=MODEL_DIR / "cct_xs_v2_global.onnx",
-                                     plate_config_path=MODEL_DIR / "cct_xs_v2_global_plate_config.yaml",
+        ocr = LicensePlateRecognizer(onnx_model_path=MODEL_DIR / "чтение_номера.onnx",
+                                     plate_config_path=MODEL_DIR / "чтение_номера.yaml",
                                      sess_options=options, device="cpu")
         _models = detector, ocr
     return _models
@@ -45,14 +44,13 @@ def backup_model():
         from fast_plate_ocr import LicensePlateRecognizer
         options = ort.SessionOptions()
         options.intra_op_num_threads = options.inter_op_num_threads = 1
-        _backup_ocr = LicensePlateRecognizer(onnx_model_path=MODEL_DIR / "cct_s_v2_global.onnx",
-                                             plate_config_path=MODEL_DIR / "cct_s_v2_global_plate_config.yaml",
+        _backup_ocr = LicensePlateRecognizer(onnx_model_path=MODEL_DIR / "резервное_чтение_номера.onnx",
+                                             plate_config_path=MODEL_DIR / "резервное_чтение_номера.yaml",
                                              sess_options=options, device="cpu")
     return _backup_ocr
 
 
 def analyze(image_bytes, *, recognize=True):
-    # Bound inference concurrency on small servers; report temporary overload instead of queueing images indefinitely.
     if not _lock.acquire(timeout=20):
         raise RecognitionUnavailable("Распознавание занято. Повторите попытку через несколько секунд.")
     try:
@@ -87,7 +85,6 @@ def _analyze(image_bytes, *, recognize=True):
     tensor = np.asarray(canvas, dtype=np.float32).transpose(2, 0, 1)[None] / 255.0
     predictions = detector.run(None, {detector.get_inputs()[0].name: tensor})[0][0].T
     predictions = predictions[predictions[:, 4] >= 0.25]
-    # Adjacent candidates are duplicates, not separate cars.
     boxes = []
     for cx, cy, w, h, score in predictions[predictions[:, 4].argsort()[::-1]]:
         x1, y1, x2, y2 = cx-w/2, cy-h/2, cx+w/2, cy+h/2
@@ -100,7 +97,6 @@ def _analyze(image_bytes, *, recognize=True):
         boxes.append((x1, y1, x2, y2, area))
         if len(boxes) >= 5:
             break
-    # Coordinates are normalized to the displayed, orientation-corrected photo.
     rectangles = []
     for x1, y1, x2, y2, _ in boxes:
         x1, x2 = max(0, (x1-left)/scale), min(width, (x2-left)/scale)
@@ -120,8 +116,6 @@ def _analyze(image_bytes, *, recognize=True):
                               min(width, int(x2*width+margin_x)), min(height, int(y2*height+margin_y))))
     if tight_crop.width < 5 or tight_crop.height < 5:
         return result
-    # Plate-specific OCR is sensitive to the space around the plate. Try the
-    # detector's exact crop first, then a padded crop for imperfect detections.
     candidate = (None, None)
     for crop in (tight_crop, padded_crop):
         prediction = ocr.run(np.asarray(crop), return_confidence=True)[0]
@@ -131,8 +125,6 @@ def _analyze(image_bytes, *, recognize=True):
         if plate and region:
             candidate = (plate, region)
             break
-    # On a Russian plate sample the smaller specialist model was more accurate;
-    # use the new model as a fallback when it cannot read the whole plate.
     if not candidate[1]:
         backup = backup_model().run(np.asarray(tight_crop), return_confidence=True)[0]
         backup_plate, backup_region = parse_plate(backup.plate)
@@ -155,8 +147,6 @@ def _analyze(image_bytes, *, recognize=True):
 
 def parse_plate(text):
     text = re.sub(r"[^A-Z0-9А-Я]", "", text.upper()).translate(LETTER_TRANSLATION)
-    # Russian private-car plates have fixed letter and digit positions. OCR
-    # frequently confuses О and 0; correct only this visually identical pair.
     if len(text) >= 6:
         chars = list(text)
         for index in (0, 4, 5):
@@ -174,20 +164,20 @@ def parse_plate(text):
 
 
 def read_cyrillic(crop):
-    global _ppocr
+    global _cyrillic_reader
     import cv2
     import numpy as np
     import onnxruntime as ort
-    if _ppocr is None:
+    if _cyrillic_reader is None:
         options = ort.SessionOptions()
         options.intra_op_num_threads = options.inter_op_num_threads = 1
         options.log_severity_level = 3
-        session = ort.InferenceSession(str(MODEL_DIR / "ppocr6_cyrillic.onnx"), sess_options=options,
+        session = ort.InferenceSession(str(MODEL_DIR / "чтение_кириллицы.onnx"), sess_options=options,
                                        providers=["CPUExecutionProvider"])
         characters = [""] + session.get_modelmeta().custom_metadata_map["character"].splitlines() + [" "]
-        _ppocr = session, characters
-    session, characters = _ppocr
-    image = np.asarray(crop)[:, :, ::-1]  # PaddleOCR uses BGR.
+        _cyrillic_reader = session, characters
+    session, characters = _cyrillic_reader
+    image = np.asarray(crop)[:, :, ::-1]
     height, width = image.shape[:2]
     resized_width = min(640, max(1, math.ceil(48 * width / height)))
     resized = cv2.resize(image, (resized_width, 48)).astype(np.float32) / 127.5 - 1.0

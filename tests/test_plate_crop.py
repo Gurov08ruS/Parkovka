@@ -1,4 +1,3 @@
-"""Regression tests for OCR crop selection; no user photographs are stored here."""
 import io
 import sys
 import unittest

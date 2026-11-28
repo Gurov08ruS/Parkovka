@@ -1,4 +1,3 @@
-"""The detector cache follows the exact saved photo and survives process restarts."""
 import base64
 import sys
 import tempfile

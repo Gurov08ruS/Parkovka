@@ -460,8 +460,6 @@ async function locate({ reusePosition = false } = {}) {
 
 async function getCameraStream(video) {
     let expired = false;
-    // Prefer a sharper source for small registration marks; ideal constraints may
-    // be ignored by the device and the existing fallback still accepts any camera.
     const requested = typeof video === "object" ? { width: { ideal: 1920 }, height: { ideal: 1080 }, ...video } : video;
     const pending = navigator.mediaDevices.getUserMedia({ video: requested, audio: false }).then((stream) => {
         if (expired) stream.getTracks().forEach((track) => track.stop());
@@ -762,13 +760,12 @@ async function setCameraZoom(value) {
                     await track.applyConstraints({ advanced: [settings] });
                     appliedHardware = true;
                 } catch {
-                    // Reset the device if possible, then finish the zoom in software.
                     zoomCapability = null;
                     try {
                         const reset = { zoom: zoomBase };
                         if (flashAvailable) reset.torch = flash === "torch";
                         await track.applyConstraints({ advanced: [reset] });
-                    } catch { /* Keep the zoom reported by the device. */ }
+                    } catch {}
                 }
                 if (stream !== activeStream || zoomTrack !== track) return;
                 const actual = track.getSettings().zoom;
@@ -1227,7 +1224,6 @@ browserCameraLink.addEventListener("click", (event) => {
         window.WebApp.openLink(browserCameraLink.href);
         event.preventDefault();
     } catch {
-        // Let the link open normally if the bridge rejects the call.
     }
 });
 nextStep.addEventListener("click", () => showStep(step + 1));

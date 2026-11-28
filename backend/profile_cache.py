@@ -1,4 +1,3 @@
-"""Last known MAX profile and a bounded, local fallback for its avatar."""
 import io
 import logging
 import threading
@@ -28,7 +27,6 @@ def cached_profile(connection, account_id):
 
 def save_profile(connection, account_id, profile):
     first, last, photo, link = profile
-    # Missing values from MAX can be transient; preserve the last known values.
     connection.execute("""INSERT INTO max_profile_cache (account_id, first_name, last_name, photo_url, profile_url)
         VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET
         first_name = COALESCE(NULLIF(excluded.first_name, ''), max_profile_cache.first_name),

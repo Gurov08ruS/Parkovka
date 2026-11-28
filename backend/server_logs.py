@@ -25,7 +25,6 @@ class LogFileHandler(RotatingFileHandler):
         return [current, *(current.with_name(f"{current.name}.{i}") for i in range(1, self.backupCount + 1))]
 
     def detach(self):
-        """Move the current file and its backups out of the writer's way."""
         with self.lock:
             if self.stream is not None:
                 self.stream.close()

@@ -1,4 +1,3 @@
-"""End-to-end checks for publication, visibility boundaries and ranking."""
 import base64
 import json
 import os

@@ -1,4 +1,3 @@
-"""MAX profile fallback must survive restarts and never accept unverified logins."""
 import hashlib
 import hmac
 import importlib.util

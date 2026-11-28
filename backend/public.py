@@ -1,4 +1,3 @@
-"""Public views. Private reports never use these queries."""
 from http import HTTPStatus
 
 from achievements import earned_achievements
@@ -47,7 +46,6 @@ def public_reports(connection, source, exclude_owner=None, *, owner=None):
 
 
 def _sanitize(report):
-    # Reviewer-only ban references and decision notes are never part of the public feed.
     report.pop("auto_rejected", None)
     report.pop("ban_report_id", None)
     return report

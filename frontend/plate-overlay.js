@@ -1,4 +1,3 @@
-// Box coordinates refer to the image, rather than the surrounding gallery cell.
 export function setPlateBoxes(image, boxes = []) {
     let frame = image.parentElement;
     if (!frame?.classList.contains("plate-photo")) {
@@ -29,6 +28,5 @@ export async function loadPlateBoxes(image, url) {
         if (image.isConnected) setPlateBoxes(image, boxes);
         return boxes;
     } catch {
-        // The original photo stays available if detection is temporarily unavailable.
     }
 }

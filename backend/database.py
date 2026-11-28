@@ -59,7 +59,6 @@ def locked_key_file(path):
         if os.name == "nt":
             import msvcrt
 
-            # Lock beyond the key so readers of an existing key can still open it.
             lock_offset = 4096
             key_file.seek(lock_offset)
             msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
@@ -122,7 +121,6 @@ def migrate_plaintext(source, destination):
     os.close(descriptor)
     temporary = Path(name)
     try:
-        # SQLCipher reads the source through a consistent SQLite transaction.
         with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
             if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Исходная база не прошла проверку целостности.")
@@ -143,7 +141,6 @@ def migrate_plaintext(source, destination):
         else:
             raise ValueError("Проверка шифрования не пройдена.")
         if os.name == "nt":
-            # Windows rename fails if the destination already exists.
             temporary.rename(destination)
         else:
             os.link(temporary, destination)

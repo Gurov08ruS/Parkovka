@@ -1,4 +1,3 @@
-"""Persistent detector results for saved photographs, independent of OCR text."""
 import json
 import math
 import hashlib
@@ -7,7 +6,6 @@ from threading import Lock
 
 from plate_recognition import analyze
 
-# Bump this when detector weights or coordinate preprocessing change.
 BOX_CACHE_VERSION = "alpr26-b9162ec-letterbox640-conf025-v1"
 _recent = OrderedDict()
 _recent_lock = Lock()
@@ -53,8 +51,6 @@ def cached_photo_boxes(connection, identifier, kind, image):
     if boxes is None:
         boxes = analyze(image, recognize=False)["boxes"]
         remember_photo_boxes(image, boxes)
-    # The photo may have been replaced while inference was in progress. Never
-    # associate its coordinates with a different image.
     connection.execute(
         f"UPDATE report_captures SET {cache_column} = ? WHERE report_id = ? AND {photo_column} = ?",
         (json.dumps({"version": BOX_CACHE_VERSION, "boxes": boxes}, separators=(",", ":")), identifier, image),

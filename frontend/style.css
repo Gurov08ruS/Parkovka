@@ -117,7 +117,7 @@ main {
 
 	.hero { animation: card-appear 460ms ease-out; }
 	.guide { animation: card-appear 460ms 80ms ease-out backwards; }
-	/* Forms and report rows can arrive after the tab's initial transition. */
+
 	#tab-content > form, #tab-content > .report-row, #tab-content > [role="status"]:only-child {
 		animation: panel-appear 320ms ease-out;
 	}
@@ -645,7 +645,7 @@ a.panel-button { display: grid; place-items: center; text-align: center; text-de
 
 
 
-/* Glass surfaces and saturated reflections follow the parking illustration. */
+
 :root {
 	color-scheme: light dark;
 	--ink: #102e55;
@@ -743,7 +743,7 @@ main {
 }
 .app-header { margin-bottom: 16px; }
 @media (prefers-color-scheme: dark) {
-	/* Highlight only the navy wordmark, leaving the transparent artwork and red badge intact. */
+
 	.app-logo::after {
 		content: "";
 		position: absolute;
@@ -993,7 +993,7 @@ main {
 	}
 }
 
-/* The marker follows the image itself even when it is constrained by viewport height. */
+
 .plate-photo {
     position: relative;
     display: inline-block;

@@ -246,7 +246,6 @@ class AppHandler(SimpleHTTPRequestHandler):
         entry["samesite"] = "None" if max_session else "Lax"
         entry["max-age"] = max_age
         entry["secure"] = max_session or self.secure_cookie
-        # SimpleCookie on older Python versions has no Partitioned attribute.
         attributes = "; Partitioned" if max_session else ""
         return ("Set-Cookie", entry.OutputString() + attributes)
 
@@ -321,7 +320,6 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.path.partition("?")[0]
         if path != "/api" and not path.startswith("/api/"):
-            # Always revalidate the page and its modules as a single current UI.
             if path == "/" or path.endswith((".html", ".js", ".css")):
                 if "If-Modified-Since" in self.headers:
                     del self.headers["If-Modified-Since"]
@@ -699,7 +697,6 @@ class AppHandler(SimpleHTTPRequestHandler):
                     except (RecognitionUnavailable, ValueError):
                         if path == CAPTURE_PATH:
                             raise
-                        # Offline drafts can still be stored when recognition is unavailable.
                 if path == CAPTURE_PATH and not found:
                     raise ValueError("Госномер не найден на фотографиях. Переснимите фото так, чтобы номер был хорошо виден.")
             else:

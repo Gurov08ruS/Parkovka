@@ -124,9 +124,8 @@ export function profileAvatar(profile, fallback = "○") {
         ["#79bcff", "#4289ed"], ["#9b90fe", "#6746ec"],
     ];
     let color = profile?.avatar_color;
-    // Compatibility with older session responses; BigInt preserves 64-bit MAX IDs.
     if (!Number.isInteger(color) && /^[1-9][0-9]{0,18}$/.test(profile?.max_id || "")) {
-        try { color = Number(BigInt(profile.max_id) % BigInt(colors.length)); } catch { /* Keep the default avatar. */ }
+        try { color = Number(BigInt(profile.max_id) % BigInt(colors.length)); } catch {}
     }
     if (Number.isInteger(color) && colors[color]) {
         avatar.classList.add("profile-avatar--max");
